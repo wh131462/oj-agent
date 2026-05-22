@@ -16,6 +16,31 @@ npm install -g @oj-agent/cli
 
 > **注意**:首启动时如果未检测到系统钥匙串(`keytar` 原生模块未构建),凭证将自动落到 `~/.config/oj-agent/secrets.json`(`0600` 权限)并提示。`pnpm approve-builds` 可启用 keytar 原生构建。
 
+## 浏览器自动登录
+
+`oja login <platform>` 默认通过 `playwright-core` 拉起系统浏览器(Chrome / Edge / Brave / Chromium 任一),用户在浏览器内人工完成登录后,CLI 自动抓取 cookie 与用户名,无需 DevTools 复制粘贴。
+
+```bash
+oja login leetcode-cn          # 默认浏览器自动
+oja login leetcode-cn --manual # 显式走粘贴流程(M1 行为)
+oja login leetcode-cn --cookie 'LEETCODE_SESSION=...; csrftoken=...'  # 直接传整段 cookie
+oja login leetcode-cn --browser chrome           # 优先用 Chrome
+oja login leetcode-cn --browser-timeout-ms 600000 # 自定义超时
+```
+
+**前提**:系统装有 Chrome / Edge / Brave / Chromium 任一,且 `playwright-core` 已安装(`pnpm install` 默认会装,`optionalDependencies`)。
+
+**降级**:
+- 系统未检测到 Chromium 系浏览器 → 自动 fallback 到粘贴流程
+- `playwright-core` 未装 → 同上 fallback
+- 用户 Ctrl+C 取消浏览器 → 退出码 130,提示用 `--manual`
+
+**macOS 注意**:首次启动可能弹出 "oja 想控制 Google Chrome" 系统对话框,需要点同意。这只发生一次。
+
+**安全**:
+- 浏览器以可见模式启动,使用临时 `userDataDir`(完成后自动清理),不复用用户已有浏览器配置
+- cookie value 不写入任何日志,只记 cookie name
+
 ## 命令一览
 
 | 命令 | 说明 |

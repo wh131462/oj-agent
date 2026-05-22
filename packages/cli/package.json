@@ -18,7 +18,8 @@
     "@oj-agent/core": "workspace:*"
   },
   "optionalDependencies": {
-    "keytar": "^7.9.0"
+    "keytar": "^7.9.0",
+    "playwright-core": "^1.48.0"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
