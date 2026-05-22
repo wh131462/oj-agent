@@ -1,0 +1,345 @@
+/**
+ * 工作区管理器。
+ *
+ * 落盘约定:
+ *   <rootDir>/<platform>/<id>-<slug>-<YYYY-MM-DD>/
+ *     problem.md
+ *     meta.json
+ *     cases/in_<n>.txt
+ *     cases/out_<n>.txt
+ *     solution.<ext>   (已存在不覆盖)
+ *
+ * 所有写入使用 LF 换行、UTF-8 无 BOM。
+ */
+
+import { promises as fs } from 'node:fs';
+import * as path from 'node:path';
+import { createHash } from 'node:crypto';
+import type {
+  PlatformId,
+  PlatformProblemDetail,
+} from '../platform/adapter.js';
+import { NoopLogger, type LoggerBackend } from '../logger/logger.js';
+import { normalizeSlug } from './slug.js';
+
+export type DefaultLang = 'cpp' | 'python3' | 'java' | 'javascript';
+
+export const LANG_EXT: Record<DefaultLang, string> = {
+  cpp: 'cpp',
+  python3: 'py',
+  java: 'java',
+  javascript: 'js',
+};
+
+export interface WorkspaceMeta {
+  platform: PlatformId;
+  id: string;
+  title: string;
+  slug: string;
+  url?: string;
+  difficulty?: string;
+  tags?: string[];
+  samples: Array<{ input: string; output: string }>;
+  timeLimitMs?: number;
+  memoryLimitKb?: number;
+  codeSnippets?: Record<string, string>;
+  fetchedAt: string;
+  updatedAt: string;
+  statementHash: string;
+}
+
+export interface WriteProblemOptions {
+  rootDir: string;
+  defaultLang?: DefaultLang;
+  /** 远端 updatedAt(ISO 字符串),不传则使用当前时间。 */
+  remoteUpdatedAt?: string;
+}
+
+export interface WriteProblemResult {
+  problemDir: string;
+  created: boolean;
+  solutionPath: string;
+}
+
+export class WorkspaceManager {
+  private readonly logger: LoggerBackend;
+
+  constructor(opts: { logger?: LoggerBackend } = {}) {
+    this.logger = opts.logger ?? new NoopLogger();
+  }
+
+  resolveProblemDir(
+    platform: PlatformId,
+    id: string,
+    rawSlug: string,
+    rootDir: string,
+    date: Date = new Date(),
+  ): string {
+    const slug = normalizeSlug(rawSlug, id);
+    const ymd = date.toISOString().slice(0, 10);
+    return path.join(expandHome(rootDir), platform, `${id}-${slug}-${ymd}`);
+  }
+
+  async writeProblem(
+    detail: PlatformProblemDetail,
+    options: WriteProblemOptions,
+  ): Promise<WriteProblemResult> {
+    const rawSlug = extractSlugFromUrl(detail.url) ?? detail.title;
+    const problemDir = this.resolveProblemDir(
+      detail.platform,
+      detail.id,
+      rawSlug,
+      options.rootDir,
+    );
+    const slug = path.basename(problemDir).replace(/-\d{4}-\d{2}-\d{2}$/, '').replace(`${detail.id}-`, '');
+
+    let created = false;
+    try {
+      await fs.stat(problemDir);
+    } catch {
+      created = true;
+    }
+    await fs.mkdir(path.join(problemDir, 'cases'), { recursive: true });
+
+    // problem.md
+    await writeAtomic(path.join(problemDir, 'problem.md'), detail.statement, this.logger);
+
+    // meta.json
+    const now = new Date().toISOString();
+    const meta: WorkspaceMeta = {
+      platform: detail.platform,
+      id: detail.id,
+      title: detail.title,
+      slug,
+      url: detail.url,
+      difficulty: detail.difficulty,
+      tags: detail.tags,
+      samples: detail.samples.map((s) => ({ input: s.input, output: s.output })),
+      timeLimitMs: detail.timeLimitMs,
+      memoryLimitKb: detail.memoryLimitKb,
+      codeSnippets: detail.codeSnippets,
+      fetchedAt: now,
+      updatedAt: options.remoteUpdatedAt ?? now,
+      statementHash: sha256(detail.statement),
+    };
+    await writeAtomic(
+      path.join(problemDir, 'meta.json'),
+      JSON.stringify(meta, null, 2) + '\n',
+      this.logger,
+    );
+
+    // cases
+    for (let i = 0; i < detail.samples.length; i++) {
+      const n = i + 1;
+      await writeAtomic(
+        path.join(problemDir, 'cases', `in_${n}.txt`),
+        detail.samples[i]!.input ?? '',
+        this.logger,
+      );
+      await writeAtomic(
+        path.join(problemDir, 'cases', `out_${n}.txt`),
+        detail.samples[i]!.output ?? '',
+        this.logger,
+      );
+    }
+
+    // solution.<ext>(已存在不覆盖)
+    const lang = options.defaultLang ?? 'cpp';
+    const ext = LANG_EXT[lang];
+    const filename = lang === 'java' ? 'Main.java' : `solution.${ext}`;
+    const solutionPath = path.join(problemDir, filename);
+    const existed = await exists(solutionPath);
+    if (!existed) {
+      const snippet = detail.codeSnippets?.[lang === 'javascript' ? 'javascript' : lang];
+      const content = snippet ?? defaultTemplate(lang);
+      await writeAtomic(solutionPath, content, this.logger);
+    }
+
+    this.logger.info('workspace', 'wrote problem', {
+      problemDir,
+      platform: detail.platform,
+      id: detail.id,
+      created,
+    });
+
+    return { problemDir, created, solutionPath };
+  }
+
+  async readMeta(problemDir: string): Promise<WorkspaceMeta | undefined> {
+    const p = path.join(problemDir, 'meta.json');
+    try {
+      const raw = await fs.readFile(p, 'utf-8');
+      return JSON.parse(raw) as WorkspaceMeta;
+    } catch (e) {
+      const err = e as NodeJS.ErrnoException;
+      if (err.code === 'ENOENT') return undefined;
+      this.logger.warn('workspace', 'meta.json 解析失败', { problemDir, error: err.message });
+      return undefined;
+    }
+  }
+
+  /**
+   * 根据远端 detail 判断是否需要刷新本地题面与样例;
+   * 保留 solution.* 与编号大于 N 的自定义 case。
+   */
+  async refresh(
+    detail: PlatformProblemDetail,
+    problemDir: string,
+  ): Promise<{ refreshed: boolean }> {
+    const meta = await this.readMeta(problemDir);
+    if (meta) {
+      const remoteHash = sha256(detail.statement);
+      if (
+        meta.statementHash === remoteHash &&
+        meta.samples.length === detail.samples.length &&
+        meta.samples.every(
+          (s, i) =>
+            s.input === detail.samples[i]?.input && s.output === detail.samples[i]?.output,
+        )
+      ) {
+        return { refreshed: false };
+      }
+    }
+
+    // 覆盖 problem.md / meta.json
+    await writeAtomic(path.join(problemDir, 'problem.md'), detail.statement, this.logger);
+    const now = new Date().toISOString();
+    const newMeta: WorkspaceMeta = {
+      platform: detail.platform,
+      id: detail.id,
+      title: detail.title,
+      slug: meta?.slug ?? normalizeSlug(detail.title, detail.id),
+      url: detail.url,
+      difficulty: detail.difficulty,
+      tags: detail.tags,
+      samples: detail.samples.map((s) => ({ input: s.input, output: s.output })),
+      timeLimitMs: detail.timeLimitMs,
+      memoryLimitKb: detail.memoryLimitKb,
+      codeSnippets: detail.codeSnippets,
+      fetchedAt: meta?.fetchedAt ?? now,
+      updatedAt: now,
+      statementHash: sha256(detail.statement),
+    };
+    await writeAtomic(
+      path.join(problemDir, 'meta.json'),
+      JSON.stringify(newMeta, null, 2) + '\n',
+      this.logger,
+    );
+
+    // 覆盖 cases/in_1..N / out_1..N(N = 远端 sample 数量)
+    await fs.mkdir(path.join(problemDir, 'cases'), { recursive: true });
+    for (let i = 0; i < detail.samples.length; i++) {
+      const n = i + 1;
+      await writeAtomic(
+        path.join(problemDir, 'cases', `in_${n}.txt`),
+        detail.samples[i]!.input ?? '',
+        this.logger,
+      );
+      await writeAtomic(
+        path.join(problemDir, 'cases', `out_${n}.txt`),
+        detail.samples[i]!.output ?? '',
+        this.logger,
+      );
+    }
+    // 注意:编号 > N 的用户自定义 case 保留(不动 in_{N+1}.txt 等)
+
+    this.logger.info('workspace', 'refreshed problem', { problemDir });
+    return { refreshed: true };
+  }
+
+  /**
+   * 追加自定义用例。
+   * 编号 = 当前 cases/ 下 in_<n>.txt 的最大 n + 1。
+   * 同时更新 meta.json.samples。
+   */
+  async addCustomCase(
+    problemDir: string,
+    input: string,
+    output?: string,
+  ): Promise<number> {
+    const casesDir = path.join(problemDir, 'cases');
+    await fs.mkdir(casesDir, { recursive: true });
+    const files = await fs.readdir(casesDir).catch(() => [] as string[]);
+    let maxN = 0;
+    for (const f of files) {
+      const m = f.match(/^in_(\d+)\.txt$/);
+      if (m) maxN = Math.max(maxN, Number(m[1]));
+    }
+    const next = maxN + 1;
+    await writeAtomic(path.join(casesDir, `in_${next}.txt`), input, this.logger);
+    if (output !== undefined) {
+      await writeAtomic(path.join(casesDir, `out_${next}.txt`), output, this.logger);
+    }
+    // 同步 meta.json.samples
+    const meta = await this.readMeta(problemDir);
+    if (meta) {
+      meta.samples = [...meta.samples, { input, output: output ?? '' }];
+      meta.updatedAt = new Date().toISOString();
+      await writeAtomic(
+        path.join(problemDir, 'meta.json'),
+        JSON.stringify(meta, null, 2) + '\n',
+        this.logger,
+      );
+    }
+    return next;
+  }
+}
+
+async function writeAtomic(filePath: string, content: string, logger: LoggerBackend): Promise<void> {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  // LF 换行,UTF-8 无 BOM
+  const normalized = content.replace(/\r\n/g, '\n');
+  const tmp = filePath + '.tmp-' + Math.random().toString(36).slice(2, 8);
+  try {
+    await fs.writeFile(tmp, normalized, 'utf-8');
+    await fs.rename(tmp, filePath);
+  } catch (e) {
+    logger.warn('workspace', 'atomic write failed', { filePath, error: (e as Error).message });
+    // 清理临时文件
+    await fs.unlink(tmp).catch(() => {});
+    throw e;
+  }
+}
+
+async function exists(p: string): Promise<boolean> {
+  try {
+    await fs.stat(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function sha256(s: string): string {
+  return createHash('sha256').update(s).digest('hex');
+}
+
+function expandHome(p: string): string {
+  if (p.startsWith('~/') || p === '~') {
+    const home = process.env.HOME || process.env.USERPROFILE || '';
+    return path.join(home, p.slice(2));
+  }
+  return p;
+}
+
+function extractSlugFromUrl(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  // LeetCode: https://leetcode.cn/problems/two-sum/
+  const lc = url.match(/leetcode\.\w+\/problems\/([^/]+)/);
+  if (lc) return lc[1];
+  // HDOJ url 没有 slug,返回 undefined
+  return undefined;
+}
+
+function defaultTemplate(lang: DefaultLang): string {
+  switch (lang) {
+    case 'cpp':
+      return '#include <bits/stdc++.h>\nusing namespace std;\n\nint main() {\n    // TODO: 在此处编写代码\n    return 0;\n}\n';
+    case 'python3':
+      return '# TODO: 在此处编写代码\n';
+    case 'java':
+      return 'public class Main {\n    public static void main(String[] args) {\n        // TODO: 在此处编写代码\n    }\n}\n';
+    case 'javascript':
+      return '// TODO: 在此处编写代码\n';
+  }
+}
