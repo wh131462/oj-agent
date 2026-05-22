@@ -31,54 +31,69 @@
 - **WHEN** 执行 `oja pull --help`
 - **THEN** 输出 `pull` 的用法、参数说明、示例,退出码 0
 
-### Requirement: 退出码语义
+### Requirement: 退出码语义(扩展)
 
-CLI MUST 按下表使用退出码:
+CLI MUST 按下表使用退出码,与 M1 已落地的 cli-commands 规约兼容并新增浏览器登录路径:
 
 | 码 | 含义 |
 |---|---|
-| 0 | 成功 |
-| 1 | 业务失败(WA / 提交失败 / 拉取失败 / 网络错误 / 未登录 / 限速) |
-| 2 | 用法错误(参数缺失、未知子命令、`config get` 不存在 key 等) |
-| 3 | 环境错误(toolchain 缺失、keytar 与 fallback 都不可用) |
-| 130 | 收到 SIGINT |
+| 0 | 登录成功 / 命令成功 |
+| 1 | 登录失败(凭证校验未过、捕获失败) |
+| 3 | 环境错误:浏览器找不到且 `--manual` 也失败 |
+| 130 | SIGINT 取消 |
 
-#### Scenario: 未登录退出 1
-- **WHEN** 未登录情况下执行 `oja submit`
-- **THEN** stderr 提示 `'未登录,请运行 oja login <platform>'`,退出码 1
+退出码 3 之外的环境失败 MUST 自动降级而非直接退出。
 
-#### Scenario: 参数错误退出 2
-- **WHEN** 执行 `oja config set`(缺 key/value)
-- **THEN** stderr 输出用法,退出码 2
+#### Scenario: 浏览器与粘贴双失败退 3
 
-#### Scenario: SIGINT 退出 130
-- **WHEN** `oja pull` 运行中按 Ctrl-C
-- **THEN** 进程退出码 130,不输出 stack
+- **WHEN** `--manual` 流程也失败(用户多次输入空 cookie)
+- **THEN** 退出码 3
 
 ### Requirement: `oja login`
 
-`oja login <platform>` SHALL 按平台实现登录:
+`oja login <platform>` SHALL 默认使用浏览器自动登录:
 
-- `leetcode-cn`:交互式提示分两步输入 `LEETCODE_SESSION` 与 `csrftoken`;读取后调用 `CredentialChecker.check('leetcode-cn')`,`'valid'` 时写入 `CredentialStore`,否则 `exit 1`。
-- `hdoj`:交互式提示输入用户名 + 密码;通过 `HttpClient` POST `userloginex.php`(GBK 表单)登录,从响应 `Set-Cookie` 取 `PHPSESSID`,校验后写入。
+- 启动 `PlaywrightBrowserLogin`(基于 `playwright-core`)
+- 自动检测系统 Chrome / Edge / Brave / Chromium,顺序探测
+- 找到任一可用浏览器即启动 headed 实例,加载平台登录页
+- 用户在浏览器内人工登录,CLI 监听导航/cookie 变化,完成后自动抽取
+- `LoginFlow` 校验通过后写入 `CredentialStore`
 
-同时支持非交互式 `--cookie <raw>`(整段 cookie 字符串,跳过提示直接校验后落盘)。
+flag:
+- `--manual`:跳过浏览器,走粘贴流程(原 M1 行为)
+- `--cookie <raw>`:直接传入 cookie,跳过交互(原 M1 行为)
+- `--browser <name>`:指定优先尝试的浏览器(`chrome` / `edge` / `brave` / `chromium`)
+- `--browser-timeout-ms <n>`:浏览器登录总超时,默认 300000
 
-#### Scenario: LeetCode CN 交互式登录
-- **WHEN** TTY 下执行 `oja login leetcode-cn`,用户依次输入合法 SESSION 与 csrftoken
-- **THEN** stderr 提示 `'✓ 登录成功'`,`CredentialStore.get('leetcode-cn')` 返回包含两个键值的 cookie 字符串,退出码 0
+降级路径:
+- 系统未安装任何 Chromium 系浏览器 → CLI 自动 fallback 到粘贴流程,首先打印一行警告
+- `playwright-core` 加载失败(未安装) → 同上 fallback
+- 用户 Ctrl+C 中止浏览器流程 → CLI 提示"已取消,可使用 `oja login --manual` 走粘贴模式"后退出 130
 
-#### Scenario: HDOJ 用户名密码登录
-- **WHEN** TTY 下执行 `oja login hdoj`,输入正确账号
-- **THEN** 出网 POST `userloginex.php` 包含 GBK 编码 form,响应 `Set-Cookie` 包含 `PHPSESSID`,写入凭证后退出码 0
+#### Scenario: 自动登录成功
 
-#### Scenario: 非交互式 --cookie
-- **WHEN** 执行 `oja login leetcode-cn --cookie 'LEETCODE_SESSION=a; csrftoken=b'`,且校验通过
-- **THEN** 不进入交互,直接落盘,退出码 0
+- **WHEN** 用户执行 `oja login leetcode-cn`,系统有 Chrome,在浏览器内 30 秒内完成登录
+- **THEN** stderr 流式输出 `启动浏览器... → 等待登录... → ✓ 登录成功(用户名: foo)`,退出码 0,凭证已落 keytar/file
 
-#### Scenario: 登录失败
-- **WHEN** cookie 校验 `'expired'` 或 HDOJ 账号错误
-- **THEN** stderr 输出 `'登录失败:<原因>'`,退出码 1,凭证仓库不更新
+#### Scenario: 显式 manual 跳过自动
+
+- **WHEN** 执行 `oja login leetcode-cn --manual`
+- **THEN** 直接走 M1 粘贴流程,不启动任何浏览器
+
+#### Scenario: 浏览器找不到自动降级
+
+- **WHEN** 系统无 Chromium 系浏览器,执行 `oja login leetcode-cn`
+- **THEN** stderr 输出 `[oja] 自动登录不可用(未检测到 Chrome/Edge/Brave),改用粘贴模式...`,然后进入粘贴流程
+
+#### Scenario: --cookie 仍直通
+
+- **WHEN** `oja login leetcode-cn --cookie 'LEETCODE_SESSION=a; csrftoken=b'`
+- **THEN** 不启动浏览器,直接调 `CredentialChecker.check` 校验后写入
+
+#### Scenario: 用户中止
+
+- **WHEN** 浏览器已启动,用户按 Ctrl+C
+- **THEN** CLI 关闭浏览器进程,清理临时 userDataDir,退出码 130,stderr 输出"已取消"
 
 ### Requirement: `oja logout` 与 `oja status`
 
