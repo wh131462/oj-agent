@@ -46,7 +46,8 @@
       { "command": "ojAgent.submission.submit", "title": "OJ-Agent: 提交当前题解", "category": "OJ-Agent", "icon": "$(cloud-upload)" },
       { "command": "ojAgent.submission.openLatest", "title": "OJ-Agent: 打开最近一次提交结果", "category": "OJ-Agent" },
 
-      { "command": "ojAgent.auth.login", "title": "OJ-Agent: 登录 OJ 平台", "category": "OJ-Agent" },
+      { "command": "ojAgent.auth.login", "title": "OJ-Agent: 登录 OJ 平台(浏览器自动)", "category": "OJ-Agent" },
+      { "command": "ojAgent.auth.loginManual", "title": "OJ-Agent: 登录 OJ 平台(手动粘贴 Cookie)", "category": "OJ-Agent" },
       { "command": "ojAgent.auth.logout", "title": "OJ-Agent: 登出 OJ 平台", "category": "OJ-Agent" },
       { "command": "ojAgent.auth.relogin", "title": "OJ-Agent: 重新登录 OJ 平台", "category": "OJ-Agent" },
       { "command": "ojAgent.auth.openCookieGuide", "title": "OJ-Agent: 打开 Cookie 获取指引", "category": "OJ-Agent" },
@@ -170,6 +171,9 @@
     "katex": "^0.16.11",
     "markdown-it": "^14.1.0",
     "markdown-it-texmath": "^1.0.0"
+  },
+  "optionalDependencies": {
+    "playwright-core": "^1.48.0"
   },
   "devDependencies": {
     "@types/markdown-it": "^14.1.2",

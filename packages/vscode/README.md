@@ -27,9 +27,11 @@
 - 点击弹 QuickPick（登录 / 登出 / 重新登录 / 设置工作区根目录 / 打开 OutputChannel / 工具链状态）
 
 ### 登录
-- **LeetCode CN**：命令 `OJ-Agent: 登录 OJ 平台 → leetcode-cn`，QuickInput 分两步粘贴 `LEETCODE_SESSION` 与 `csrftoken`
-- **HDOJ**：先尝试 webview 加载 `userloginex.php`，60 秒未获取 Cookie 自动降级到账号密码 form POST
-- 凭证仅保存在 VSCode SecretStorage，与 AI Key 命名空间隔离
+- **默认浏览器自动登录**:命令 `OJ-Agent: 登录 OJ 平台(浏览器自动)` 拉起系统 Chrome / Edge / Brave 任一,用户在浏览器内人工完成登录,扩展自动抓 cookie + 用户名
+- **手动粘贴**:命令 `OJ-Agent: 登录 OJ 平台(手动粘贴 Cookie)` 走 QuickInput / Webview 流程(M1 行为)
+- 浏览器找不到 / `playwright-core` 未装 → 自动降级到手动粘贴
+- macOS 首次会弹"扩展想控制 Chrome"对话框,需要点同意(只一次)
+- 凭证仅保存在 VSCode SecretStorage,与 AI Key 命名空间隔离
 
 ## 配置项
 
