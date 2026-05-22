@@ -1,0 +1,28 @@
+{
+  "name": "@oj-agent/cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OJ-Agent CLI (oja). M1: login / list / pull / test / submit / config / toolchain.",
+  "type": "module",
+  "bin": {
+    "oja": "./dist/index.js"
+  },
+  "files": ["dist", "src"],
+  "scripts": {
+    "build": "tsc -p .",
+    "watch": "tsc -p . -w",
+    "test": "node --test --import tsx \"test/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@iarna/toml": "^2.2.5",
+    "@oj-agent/core": "workspace:*"
+  },
+  "optionalDependencies": {
+    "keytar": "^7.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.0"
+  }
+}

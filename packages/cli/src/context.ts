@@ -1,0 +1,94 @@
+/**
+ * CLI 上下文:装配 core 引擎与 backend。
+ * 命令通过 context 拿到所需服务,而不重复构造。
+ */
+
+import {
+  HttpClient,
+  PlatformAdapterRegistry,
+  RateLimiter,
+  SecretCredentialStore,
+  WorkspaceManager,
+  JudgeRunner,
+  SubmissionRunner,
+  ToolchainProbe,
+  CredentialChecker,
+  type LoggerBackend,
+} from '@oj-agent/core';
+import {
+  TomlConfigBackend,
+  resolveConfigPath,
+} from './backends/toml-config.js';
+import { createSecretBackend, type SecretBackendInfo } from './backends/index.js';
+import { TerminalLogger } from './logger/terminal-logger.js';
+import type { GlobalOptions } from './utils/globals.js';
+
+export interface CliContext {
+  config: TomlConfigBackend;
+  secretInfo: SecretBackendInfo;
+  credentialStore: SecretCredentialStore;
+  httpClient: HttpClient;
+  registry: PlatformAdapterRegistry;
+  workspace: WorkspaceManager;
+  judge: JudgeRunner;
+  submission: SubmissionRunner;
+  toolchain: ToolchainProbe;
+  credChecker: CredentialChecker;
+  logger: LoggerBackend;
+  globals: GlobalOptions;
+  configPath: string;
+}
+
+export async function createContext(globals: GlobalOptions): Promise<CliContext> {
+  const configPath = resolveConfigPath({ explicit: globals.config });
+  const config = new TomlConfigBackend({ configPath });
+  const logger = new TerminalLogger(globals);
+  const secretInfo = await createSecretBackend({ configPath });
+
+  if (secretInfo.warning && !globals.quiet && !globals.json) {
+    process.stderr.write('[oja] ' + secretInfo.warning + '\n');
+  }
+
+  const credentialStore = new SecretCredentialStore(secretInfo.backend);
+
+  // 限速:按平台读取配置
+  const rateLimiter = new RateLimiter((bucket) => {
+    const key = `http.rateLimit.${bucket}`;
+    return config.getWithDefault<number>(key, 60);
+  });
+
+  const proxyUrl = config.getWithDefault<string>('http.proxy', '') || undefined;
+
+  const httpClient = new HttpClient({
+    credentialStore,
+    rateLimiter,
+    proxyUrl,
+  });
+
+  const registry = new PlatformAdapterRegistry({
+    httpClient,
+    credentialStore,
+    rateLimiter,
+  });
+  const workspace = new WorkspaceManager({ logger });
+  const toolchain = new ToolchainProbe({ logger });
+  const judge = new JudgeRunner({ logger, toolchain });
+  const submission = new SubmissionRunner({ registry, credentialStore, logger });
+  const credChecker = new CredentialChecker(httpClient);
+
+  return {
+    config,
+    secretInfo,
+    credentialStore,
+    httpClient,
+    registry,
+    workspace,
+    judge,
+    submission,
+    toolchain,
+    credChecker,
+    logger,
+    globals,
+    configPath,
+  };
+}
