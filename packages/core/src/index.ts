@@ -91,6 +91,22 @@ export type {
 export { CredentialChecker } from './auth/credential-checker.js';
 export type { CredentialStatus } from './auth/credential-checker.js';
 
+// Auth: browser-auto-login
+export {
+  BrowserNotFoundError,
+  BrowserLoginCancelledError,
+  BrowserLoginTimeoutError,
+} from './auth/browser-login.js';
+export type {
+  BrowserLoginCapture,
+  LoginConfig,
+  CapturedAuth,
+  BrowserPageHandle,
+} from './auth/browser-login.js';
+export { LoginFlow } from './auth/login-flow.js';
+export type { LoginResult, LoginFailureReason, LoginFlowDeps } from './auth/login-flow.js';
+export { platformLoginConfigs } from './auth/platform-login-configs.js';
+
 // Platform adapter contracts (type-only placeholders for future implementations)
 export type {
   PlatformId,
