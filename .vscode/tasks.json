@@ -1,0 +1,21 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["-r", "build"],
+      "group": "build",
+      "problemMatcher": ["$tsc"],
+      "label": "pnpm: build"
+    },
+    {
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["-r", "--parallel", "watch"],
+      "isBackground": true,
+      "problemMatcher": ["$tsc-watch"],
+      "label": "pnpm: watch"
+    }
+  ]
+}
