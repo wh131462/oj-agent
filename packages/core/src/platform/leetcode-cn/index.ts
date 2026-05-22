@@ -33,7 +33,7 @@ query problemsetQuestionList($categorySlug: String, $limit: Int, $skip: Int, $fi
       titleSlug
       topicTags {
         name
-        nameTranslated
+        translatedName
         slug
       }
     }
@@ -61,7 +61,7 @@ query questionData($titleSlug: String!) {
     }
     topicTags {
       name
-      nameTranslated
+      translatedName
       slug
     }
     stats
@@ -118,7 +118,7 @@ export class LeetCodeCnAdapter implements PlatformAdapter {
           titleCn?: string;
           titleSlug: string;
           difficulty: string;
-          topicTags?: Array<{ name: string; nameTranslated?: string; slug: string }>;
+          topicTags?: Array<{ name: string; translatedName?: string; slug: string }>;
         }>;
       };
     }>({
@@ -137,7 +137,7 @@ export class LeetCodeCnAdapter implements PlatformAdapter {
       id: q.frontendQuestionId,
       title: q.titleCn || q.title,
       difficulty: normalizeDifficulty(q.difficulty),
-      tags: (q.topicTags ?? []).map((t) => t.nameTranslated || t.name),
+      tags: (q.topicTags ?? []).map((t) => t.translatedName || t.name),
       url: `https://leetcode.cn/problems/${q.titleSlug}/`,
     }));
   }
@@ -157,7 +157,7 @@ export class LeetCodeCnAdapter implements PlatformAdapter {
         sampleTestCase?: string;
         metaData?: string;
         codeSnippets?: Array<{ lang: string; langSlug: string; code: string }>;
-        topicTags?: Array<{ name: string; nameTranslated?: string; slug: string }>;
+        topicTags?: Array<{ name: string; translatedName?: string; slug: string }>;
       };
     }>({
       query: QUESTION_DATA_QUERY,
@@ -193,7 +193,7 @@ export class LeetCodeCnAdapter implements PlatformAdapter {
       id: q.questionFrontendId,
       title: q.translatedTitle || q.title,
       difficulty: normalizeDifficulty(q.difficulty),
-      tags: (q.topicTags ?? []).map((t) => t.nameTranslated || t.name),
+      tags: (q.topicTags ?? []).map((t) => t.translatedName || t.name),
       url: `https://leetcode.cn/problems/${q.titleSlug}/`,
       statement,
       samples,
@@ -317,14 +317,19 @@ export class LeetCodeCnAdapter implements PlatformAdapter {
   }
 
   /**
-   * 解析样例。优先 exampleTestcases(换行分隔字符串),按 metaData.params.length 切分;
-   * 若为空降级从 HTML 中解析 "Example N" 块的 input/output。
+   * 解析样例。
+   *
+   * - input 优先来自 `exampleTestcases`(GraphQL 字段,已经按 \n 切分,干净)
+   * - output 来自 HTML `<pre>` 块中的"输出/Output"段(`exampleTestcases` 不含 output)
+   * - 若 `exampleTestcases` 为空则完全从 HTML 抽 input + output
    */
   private extractSamples(
     exampleTestcases: string,
     metaDataStr: string,
     contentHtml: string,
   ): PlatformSampleCase[] {
+    const fromHtml = parseSamplesFromContent(contentHtml);
+
     if (exampleTestcases && exampleTestcases.trim().length > 0) {
       let paramCount = 1;
       try {
@@ -339,13 +344,16 @@ export class LeetCodeCnAdapter implements PlatformAdapter {
       const samples: PlatformSampleCase[] = [];
       for (let i = 0; i + paramCount <= lines.length; i += paramCount) {
         const input = lines.slice(i, i + paramCount).join('\n');
-        samples.push({ input, output: '' });
+        // 用 HTML 中对应位置的 output 填充
+        const idx = samples.length;
+        const output = fromHtml[idx]?.output ?? '';
+        samples.push({ input, output });
       }
       if (samples.length > 0) return samples;
     }
 
-    // 降级:尝试从 HTML 中扫 Example
-    return parseSamplesFromContent(contentHtml);
+    // 完全降级:从 HTML 中抽 input + output
+    return fromHtml;
   }
 }
 
