@@ -65,6 +65,16 @@ export function parseArgs(argv: string[], schema: FlagsSpec): ParsedArgs {
       continue;
     }
     if (tok.startsWith('--no-')) {
+      const literalName = tok.slice(2);
+      if (literalName in schema) {
+        const spec = schema[literalName]!;
+        if (spec.type !== 'boolean') {
+          throw new UsageError(`参数 --${literalName} 不是布尔 flag`);
+        }
+        flags[literalName] = true;
+        i++;
+        continue;
+      }
       const name = tok.slice('--no-'.length);
       ensureKnown(name, schema);
       const spec = schema[name]!;
