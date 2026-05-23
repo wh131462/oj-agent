@@ -12,11 +12,13 @@ import { getEnabledPlatforms } from '../oj-services.js';
 
 export type ProblemTreeNode =
   | { kind: 'platform'; platform: PlatformId }
+  | { kind: 'control'; platform: PlatformId; control: ControlKind }
   | { kind: 'problem'; platform: PlatformId; summary: PlatformProblemSummary }
   | { kind: 'action'; platform: PlatformId; summary: PlatformProblemSummary; action: ProblemAction }
   | { kind: 'empty'; platform: PlatformId; reason: 'loading' | 'no-data' | 'not-logged-in' | 'error'; message?: string };
 
 type ProblemAction = 'pull' | 'openProblem' | 'openCode' | 'runTest' | 'submit';
+type ControlKind = 'search' | 'difficulty' | 'tags' | 'pager' | 'prevPage' | 'nextPage' | 'reset';
 
 interface PlatformState {
   query: PlatformListQuery;
@@ -99,6 +101,28 @@ export class ProblemTreeDataProvider implements vscode.TreeDataProvider<ProblemT
     this.emitter.fire(undefined);
   }
 
+  jumpToPage(platform: PlatformId, page: number): void {
+    const s = this.getOrInitState(platform);
+    const target = Math.max(1, Math.floor(page));
+    s.query = { ...s.query, page: target };
+    s.cache = undefined;
+    void this.ctx.workspaceState.update(queryStateKey(platform), s.query);
+    this.emitter.fire(undefined);
+  }
+
+  resetFilters(platform: PlatformId): void {
+    const s = this.getOrInitState(platform);
+    s.query = { page: 1, pageSize: s.pageSize };
+    s.cache = undefined;
+    void this.ctx.workspaceState.update(queryStateKey(platform), s.query);
+    this.emitter.fire(undefined);
+  }
+
+  hasActiveFilter(platform: PlatformId): boolean {
+    const q = this.getOrInitState(platform).query;
+    return !!(q.keyword || q.difficulty || (q.tags && q.tags.length > 0));
+  }
+
   getTreeItem(node: ProblemTreeNode): vscode.TreeItem {
     if (node.kind === 'platform') {
       const s = this.getOrInitState(node.platform);
@@ -108,6 +132,10 @@ export class ProblemTreeDataProvider implements vscode.TreeDataProvider<ProblemT
       item.tooltip = this.platformTooltip(node.platform, s);
       item.contextValue = s.credStatus === 'valid' ? 'platform-loggedin' : 'platform-loggedout';
       return item;
+    }
+
+    if (node.kind === 'control') {
+      return this.renderControl(node);
     }
 
     if (node.kind === 'action') {
@@ -165,11 +193,18 @@ export class ProblemTreeDataProvider implements vscode.TreeDataProvider<ProblemT
 
     if (node.kind === 'platform') {
       const s = this.getOrInitState(node.platform);
+      const controls: ProblemTreeNode[] = this.buildControlNodes(node.platform, s);
+
       if (s.cache) {
-        if (s.cache.length === 0) return [{ kind: 'empty', platform: node.platform, reason: 'no-data' }];
-        return s.cache.map((summary): ProblemTreeNode => ({ kind: 'problem', platform: node.platform, summary }));
+        if (s.cache.length === 0) {
+          return [...controls, { kind: 'empty', platform: node.platform, reason: 'no-data' }];
+        }
+        return [
+          ...controls,
+          ...s.cache.map((summary): ProblemTreeNode => ({ kind: 'problem', platform: node.platform, summary })),
+        ];
       }
-      if (s.loading) return [{ kind: 'empty', platform: node.platform, reason: 'loading' }];
+      if (s.loading) return [...controls, { kind: 'empty', platform: node.platform, reason: 'loading' }];
 
       s.loading = true;
       try {
@@ -185,14 +220,17 @@ export class ProblemTreeDataProvider implements vscode.TreeDataProvider<ProblemT
         s.cache = [];
         s.lastError = e instanceof Error ? e.message : String(e);
         if (/AUTH_REQUIRED|401|未登录/i.test(s.lastError)) {
-          return [{ kind: 'empty', platform: node.platform, reason: 'not-logged-in' }];
+          return [...controls, { kind: 'empty', platform: node.platform, reason: 'not-logged-in' }];
         }
-        return [{ kind: 'empty', platform: node.platform, reason: 'error', message: s.lastError }];
+        return [...controls, { kind: 'empty', platform: node.platform, reason: 'error', message: s.lastError }];
       } finally {
         s.loading = false;
       }
-      if (s.cache.length === 0) return [{ kind: 'empty', platform: node.platform, reason: 'no-data' }];
-      return s.cache.map((summary): ProblemTreeNode => ({ kind: 'problem', platform: node.platform, summary }));
+      if (s.cache.length === 0) return [...controls, { kind: 'empty', platform: node.platform, reason: 'no-data' }];
+      return [
+        ...controls,
+        ...s.cache.map((summary): ProblemTreeNode => ({ kind: 'problem', platform: node.platform, summary })),
+      ];
     }
 
     if (node.kind === 'problem') {
@@ -206,6 +244,123 @@ export class ProblemTreeDataProvider implements vscode.TreeDataProvider<ProblemT
     }
 
     return [];
+  }
+
+  private buildControlNodes(platform: PlatformId, _s: PlatformState): ProblemTreeNode[] {
+    // 紧凑布局：搜索 / 难度 / 标签 / 分页 / 重置（仅在有筛选时显示）
+    const nodes: ProblemTreeNode[] = [
+      { kind: 'control', platform, control: 'search' },
+      { kind: 'control', platform, control: 'difficulty' },
+      { kind: 'control', platform, control: 'tags' },
+      { kind: 'control', platform, control: 'prevPage' },
+      { kind: 'control', platform, control: 'pager' },
+      { kind: 'control', platform, control: 'nextPage' },
+    ];
+    if (this.hasActiveFilter(platform)) {
+      nodes.push({ kind: 'control', platform, control: 'reset' });
+    }
+    return nodes;
+  }
+
+  private renderControl(node: { platform: PlatformId; control: ControlKind }): vscode.TreeItem {
+    const s = this.getOrInitState(node.platform);
+    const q = s.query;
+    switch (node.control) {
+      case 'search': {
+        const has = !!q.keyword;
+        const label = has ? `搜索: ${q.keyword}` : '搜索...';
+        const item = new vscode.TreeItem(label);
+        item.iconPath = new vscode.ThemeIcon(has ? 'search-fuzzy' : 'search');
+        item.tooltip = has ? '点击修改搜索关键字（右键可清除）' : '点击输入搜索关键字';
+        item.contextValue = has ? 'control-search-active' : 'control-search';
+        item.command = {
+          command: 'ojAgent.problems.search',
+          title: '搜索',
+          arguments: [node.platform],
+        };
+        return item;
+      }
+      case 'difficulty': {
+        const has = !!q.difficulty;
+        const label = has ? `难度: ${q.difficulty}` : '难度: 全部';
+        const item = new vscode.TreeItem(label);
+        item.iconPath = new vscode.ThemeIcon('filter');
+        item.tooltip = '按难度筛选';
+        item.contextValue = has ? 'control-difficulty-active' : 'control-difficulty';
+        item.command = {
+          command: 'ojAgent.problems.filterDifficulty',
+          title: '难度',
+          arguments: [node.platform],
+        };
+        return item;
+      }
+      case 'tags': {
+        const tags = q.tags ?? [];
+        const label = tags.length > 0 ? `标签: ${tags.join(', ')}` : '标签: 全部';
+        const item = new vscode.TreeItem(label);
+        item.iconPath = new vscode.ThemeIcon('tag');
+        item.tooltip = '按标签筛选';
+        item.contextValue = tags.length > 0 ? 'control-tags-active' : 'control-tags';
+        item.command = {
+          command: 'ojAgent.problems.filterTags',
+          title: '标签',
+          arguments: [node.platform],
+        };
+        return item;
+      }
+      case 'prevPage': {
+        const cur = q.page ?? 1;
+        const item = new vscode.TreeItem('上一页');
+        item.iconPath = new vscode.ThemeIcon('arrow-left');
+        item.contextValue = 'control-prev';
+        if (cur > 1) {
+          item.command = {
+            command: 'ojAgent.problems.prevPage',
+            title: '上一页',
+            arguments: [node.platform],
+          };
+        } else {
+          item.description = '(已是第一页)';
+        }
+        return item;
+      }
+      case 'pager': {
+        const cur = q.page ?? 1;
+        const item = new vscode.TreeItem(`第 ${cur} 页`);
+        item.iconPath = new vscode.ThemeIcon('book');
+        item.tooltip = '点击跳转到指定页';
+        item.contextValue = 'control-pager';
+        item.command = {
+          command: 'ojAgent.problems.jumpToPage',
+          title: '跳页',
+          arguments: [node.platform],
+        };
+        return item;
+      }
+      case 'nextPage': {
+        const item = new vscode.TreeItem('下一页');
+        item.iconPath = new vscode.ThemeIcon('arrow-right');
+        item.contextValue = 'control-next';
+        item.command = {
+          command: 'ojAgent.problems.nextPage',
+          title: '下一页',
+          arguments: [node.platform],
+        };
+        return item;
+      }
+      case 'reset': {
+        const item = new vscode.TreeItem('清除筛选');
+        item.iconPath = new vscode.ThemeIcon('clear-all');
+        item.tooltip = '清除所有搜索 / 难度 / 标签筛选';
+        item.contextValue = 'control-reset';
+        item.command = {
+          command: 'ojAgent.problems.resetFilters',
+          title: '清除筛选',
+          arguments: [node.platform],
+        };
+        return item;
+      }
+    }
   }
 
   private getOrInitState(platform: PlatformId): PlatformState {

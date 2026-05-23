@@ -236,6 +236,18 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "ojAgent.problems.jumpToPage",
+        "title": "OJ-Agent: 跳转到指定页",
+        "category": "OJ-Agent",
+        "icon": "$(book)"
+      },
+      {
+        "command": "ojAgent.problems.resetFilters",
+        "title": "OJ-Agent: 清除题库筛选",
+        "category": "OJ-Agent",
+        "icon": "$(clear-all)"
+      },
+      {
         "command": "ojAgent.openDebugPanel",
         "title": "OJ-Agent: 打开 Debug 日志（dev）",
         "category": "OJ-Agent",
@@ -264,34 +276,9 @@
     "menus": {
       "view/title": [
         {
-          "command": "ojAgent.problems.search",
-          "when": "view == ojAgent.problems",
-          "group": "navigation@1"
-        },
-        {
-          "command": "ojAgent.problems.filterDifficulty",
-          "when": "view == ojAgent.problems",
-          "group": "navigation@2"
-        },
-        {
-          "command": "ojAgent.problems.filterTags",
-          "when": "view == ojAgent.problems",
-          "group": "navigation@3"
-        },
-        {
-          "command": "ojAgent.problems.prevPage",
-          "when": "view == ojAgent.problems",
-          "group": "navigation@4"
-        },
-        {
-          "command": "ojAgent.problems.nextPage",
-          "when": "view == ojAgent.problems",
-          "group": "navigation@5"
-        },
-        {
           "command": "ojAgent.problems.refresh",
           "when": "view == ojAgent.problems",
-          "group": "navigation@6"
+          "group": "navigation@1"
         },
         {
           "command": "ojAgent.ai.openSettings",
@@ -324,6 +311,31 @@
           "command": "ojAgent.auth.relogin",
           "when": "view == ojAgent.problems && viewItem == platform-loggedin",
           "group": "inline@2"
+        },
+        {
+          "command": "ojAgent.problems.search",
+          "when": "view == ojAgent.problems && viewItem =~ /^platform-/",
+          "group": "1_filter@1"
+        },
+        {
+          "command": "ojAgent.problems.filterDifficulty",
+          "when": "view == ojAgent.problems && viewItem =~ /^platform-/",
+          "group": "1_filter@2"
+        },
+        {
+          "command": "ojAgent.problems.filterTags",
+          "when": "view == ojAgent.problems && viewItem =~ /^platform-/",
+          "group": "1_filter@3"
+        },
+        {
+          "command": "ojAgent.problems.resetFilters",
+          "when": "view == ojAgent.problems && viewItem =~ /^platform-/",
+          "group": "1_filter@9"
+        },
+        {
+          "command": "ojAgent.problems.jumpToPage",
+          "when": "view == ojAgent.problems && viewItem == control-pager",
+          "group": "inline@1"
         }
       ]
     },
