@@ -77,6 +77,14 @@ export type {
 } from './http/client.js';
 export { encodeForm, decodeBody } from './http/encoding.js';
 export type { SupportedEncoding } from './http/encoding.js';
+export {
+  withSession,
+  isHumanVerificationChallenge,
+  getPlatformHttpProfile,
+  PLATFORM_HTTP_PROFILES,
+  BROWSER_USER_AGENT,
+  BROWSER_ACCEPT_LANGUAGE,
+} from './http/session.js';
 
 // Auth: credential store
 export {
@@ -87,6 +95,7 @@ export type {
   CredentialStore,
   CredentialChangeListener,
   Disposable,
+  SecretCredentialStoreOptions,
 } from './auth/credential-store.js';
 export { CredentialChecker } from './auth/credential-checker.js';
 export type { CredentialStatus } from './auth/credential-checker.js';
@@ -119,6 +128,8 @@ export type {
   PlatformVerdict,
   PlatformJudgeResult,
   PlatformAdapter,
+  PlatformCapabilities,
+  PlatformDegradedInfo,
 } from './platform/adapter.js';
 
 // Platform: errors & registry & adapters
@@ -128,6 +139,10 @@ export { PlatformAdapterRegistry } from './platform/registry.js';
 export type { RegistryDeps } from './platform/registry.js';
 export { LeetCodeCnAdapter } from './platform/leetcode-cn/index.js';
 export { HDOJAdapter } from './platform/hdoj/index.js';
+export { CodeforcesAdapter } from './platform/codeforces/index.js';
+export { LuoguAdapter } from './platform/luogu/index.js';
+export { POJAdapter } from './platform/poj/index.js';
+export { LanqiaoAdapter } from './platform/lanqiao/index.js';
 
 // Logger
 export { NoopLogger } from './logger/logger.js';
@@ -161,6 +176,31 @@ export { computeBuildHash, getBuildDir } from './judge/cache.js';
 
 // Submission
 export { SubmissionRunner } from './submission/runner.js';
+
+// Shared config store
+export { SharedConfigStore } from './shared-config/index.js';
+export type {
+  SharedAIConfig,
+  SharedSession,
+  AIProfile as SharedAIProfile,
+  ConfigChangeEvent,
+  ConfigChangeListener,
+  SharedConfigStoreOptions,
+} from './shared-config/index.js';
+
+// Shared config schema (CLI + VSCode 复用)
+export {
+  CONFIG_SCHEMA,
+  listConfigKeys,
+  getConfigSpec,
+  getConfigDefault,
+  isKnownConfigKey,
+} from './config/schema.js';
+export type {
+  ConfigFieldType,
+  ConfigFieldValue,
+  ConfigFieldSpec,
+} from './config/schema.js';
 export type {
   SubmissionRunInput,
   SubmissionRunnerDeps,

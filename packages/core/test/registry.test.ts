@@ -21,9 +21,13 @@ test('Registry: get 返回同一实例(引用相等)', () => {
   assert.equal(a, b);
 });
 
-test('Registry: 未实现平台抛错', () => {
+test('Registry: 所有平台均可实例化', () => {
   const reg = makeRegistry();
-  assert.throws(() => reg.get('codeforces'), /codeforces.*未实现/);
+  const ids = ['leetcode-cn', 'hdoj', 'codeforces', 'luogu', 'poj', 'lanqiao'] as const;
+  for (const id of ids) {
+    const a = reg.get(id);
+    assert.equal(a.id, id);
+  }
 });
 
 test('Registry: 未登录调 submit 抛 AUTH_REQUIRED', async () => {

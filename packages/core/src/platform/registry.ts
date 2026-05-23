@@ -8,6 +8,10 @@ import type { CredentialStore } from '../auth/credential-store.js';
 import type { PlatformAdapter, PlatformId } from './adapter.js';
 import { LeetCodeCnAdapter } from './leetcode-cn/index.js';
 import { HDOJAdapter } from './hdoj/index.js';
+import { CodeforcesAdapter } from './codeforces/index.js';
+import { LuoguAdapter } from './luogu/index.js';
+import { POJAdapter } from './poj/index.js';
+import { LanqiaoAdapter } from './lanqiao/index.js';
 
 export interface RegistryDeps {
   httpClient: HttpClient;
@@ -35,10 +39,13 @@ export class PlatformAdapterRegistry {
       case 'hdoj':
         return new HDOJAdapter(this.deps);
       case 'codeforces':
+        return new CodeforcesAdapter(this.deps);
       case 'luogu':
+        return new LuoguAdapter(this.deps);
       case 'poj':
+        return new POJAdapter(this.deps);
       case 'lanqiao':
-        throw new Error(`平台 '${id}' 尚未实现(M1 仅支持 leetcode-cn 与 hdoj)`);
+        return new LanqiaoAdapter(this.deps);
       default: {
         const _exhaustive: never = id;
         throw new Error(`未知平台: ${String(_exhaustive)}`);
