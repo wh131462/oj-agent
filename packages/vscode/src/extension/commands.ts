@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { AIServices } from './services.js';
+import type { OJServices } from './oj-services.js';
 import { AIPanel } from './ai-panel.js';
 import { SettingsPanel } from './settings-panel.js';
 import type { AIAction, AIContextInput, ProblemDetail } from '@oj-agent/core';
@@ -168,6 +169,7 @@ export function registerCommands(
   ctx: vscode.ExtensionContext,
   services: AIServices,
   providers: ProvidersBundle,
+  oj: OJServices,
 ): vscode.Disposable[] {
   return [
     vscode.commands.registerCommand('ojAgent.ai.explainError', () =>
@@ -188,13 +190,13 @@ export function registerCommands(
     }),
     vscode.commands.registerCommand('ojAgent.ai.testConnection', () => testConnection(services)),
     vscode.commands.registerCommand('ojAgent.ai.openSettings', () => {
-      SettingsPanel.show(ctx, services);
+      SettingsPanel.show(ctx, services, oj);
     }),
     vscode.commands.registerCommand('ojAgent.ai.openPanel', () => {
       AIPanel.open(ctx, services);
     }),
     vscode.commands.registerCommand('ojAgent.ai.addProfile', () => {
-      SettingsPanel.show(ctx, services);
+      SettingsPanel.show(ctx, services, oj);
     }),
     vscode.commands.registerCommand('ojAgent.ai.refreshProfiles', () => {
       providers.profilesView.refresh();
@@ -202,11 +204,11 @@ export function registerCommands(
     vscode.commands.registerCommand('ojAgent.ai.editProfile', (arg?: unknown) => {
       const _id = resolveProfileIdArg(arg);
       // 编辑入口统一打开 Settings 面板（其中包含编辑表单）。
-      SettingsPanel.show(ctx, services);
+      SettingsPanel.show(ctx, services, oj);
     }),
     vscode.commands.registerCommand('ojAgent.ai.editProfileInline', (arg?: unknown) => {
       const _id = resolveProfileIdArg(arg);
-      SettingsPanel.show(ctx, services);
+      SettingsPanel.show(ctx, services, oj);
     }),
     vscode.commands.registerCommand('ojAgent.ai.setActiveProfile', async (arg?: unknown) => {
       let id = resolveProfileIdArg(arg);
