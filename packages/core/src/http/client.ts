@@ -17,6 +17,7 @@ import type { RateLimiter } from './rate-limiter.js';
 import { AdapterError, fromHttpStatus } from '../platform/errors.js';
 import type { PlatformId, PlatformCredential } from '../platform/adapter.js';
 import { decodeBody, encodeForm, type SupportedEncoding } from './encoding.js';
+import { isHumanVerificationChallenge } from './session.js';
 import { RateLimitError } from '../ai/types.js';
 
 export interface CredentialReader {
@@ -202,6 +203,17 @@ export class HttpClient {
         const text = await decodeBody(buf, responseEncoding);
         const respHeaders: Record<string, string> = {};
         res.headers.forEach((v, k) => (respHeaders[k] = v));
+
+        // 反爬验证检测：2xx 也可能命中 Cloudflare/易盾的人机验证页
+        if (res.status >= 200 && res.status < 400) {
+          if (isHumanVerificationChallenge(respHeaders['content-type'], text)) {
+            throw new AdapterError(
+              'AUTH_REQUIRED',
+              `平台 ${options.injectCookieFor ?? 'unknown'} 触发人机验证（Cloudflare/易盾），请先在浏览器完成登录与验证后重试`,
+              false,
+            );
+          }
+        }
 
         // 非 2xx 处理
         if (res.status >= 400) {

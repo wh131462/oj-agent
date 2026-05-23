@@ -17,9 +17,11 @@ test('platformLoginConfigs: hdoj 至少含一个 ready 信号', () => {
   assert.ok(r.urlPattern || r.cookieName || r.selector);
 });
 
-test('platformLoginConfigs: 未实现平台返回 undefined', () => {
-  assert.equal(platformLoginConfigs['codeforces'], undefined);
-  assert.equal(platformLoginConfigs['luogu'], undefined);
+test('platformLoginConfigs: 全部六个平台均已配置', () => {
+  assert.ok(platformLoginConfigs['codeforces']);
+  assert.ok(platformLoginConfigs['luogu']);
+  assert.ok(platformLoginConfigs['poj']);
+  assert.ok(platformLoginConfigs['lanqiao']);
 });
 
 test('platformLoginConfigs: extractUsername 是函数', () => {

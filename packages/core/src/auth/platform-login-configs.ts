@@ -55,11 +55,102 @@ const HDOJ: LoginConfig = {
   },
 };
 
+const CODEFORCES: LoginConfig = {
+  platform: 'codeforces',
+  loginUrl: 'https://codeforces.com/enter',
+  ready: {
+    urlPattern: /^https:\/\/codeforces\.com\/(?:$|problemset|contest|profile)/,
+    cookieName: 'JSESSIONID',
+  },
+  cookieDomain: '.codeforces.com',
+  timeoutMs: 300_000,
+  async extractUsername(page: BrowserPageHandle): Promise<string | null> {
+    try {
+      return await page.evaluate<string | null>(() => {
+        const el = document.querySelector('a.lang-chooser + a, a[href^="/profile/"]') as HTMLAnchorElement | null;
+        if (!el) return null;
+        const m = el.getAttribute('href')?.match(/\/profile\/([^/?#]+)/);
+        return m ? m[1]! : null;
+      });
+    } catch {
+      return null;
+    }
+  },
+};
+
+const LUOGU: LoginConfig = {
+  platform: 'luogu',
+  loginUrl: 'https://www.luogu.com.cn/auth/login',
+  ready: {
+    urlPattern: /^https:\/\/www\.luogu\.com\.cn\/(?:$|problem|user|contest)/,
+    cookieName: '__client_id',
+  },
+  cookieDomain: '.luogu.com.cn',
+  timeoutMs: 300_000,
+  async extractUsername(page: BrowserPageHandle): Promise<string | null> {
+    try {
+      return await page.evaluate<string | null>(() => {
+        const el = document.querySelector('a[href^="/user/"]') as HTMLAnchorElement | null;
+        if (!el) return null;
+        const m = el.getAttribute('href')?.match(/\/user\/(\d+)/);
+        return m ? m[1]! : null;
+      });
+    } catch {
+      return null;
+    }
+  },
+};
+
+const POJ: LoginConfig = {
+  platform: 'poj',
+  loginUrl: 'http://poj.org/login',
+  ready: {
+    urlPattern: /^http:\/\/poj\.org\/(?:$|userstatus|problemlist)/,
+    cookieName: 'PHPSESSID',
+  },
+  cookieDomain: '.poj.org',
+  timeoutMs: 300_000,
+  async extractUsername(page: BrowserPageHandle): Promise<string | null> {
+    try {
+      return await page.evaluate<string | null>(() => {
+        const m = document.body?.innerText?.match(/Welcome,\s*([^\s,!]+)/i);
+        return m ? m[1]! : null;
+      });
+    } catch {
+      return null;
+    }
+  },
+};
+
+const LANQIAO: LoginConfig = {
+  platform: 'lanqiao',
+  // 蓝桥云课 SSO 通过 passport.lanqiao.cn 完成,成功后跳回主站
+  loginUrl: 'https://passport.lanqiao.cn/login',
+  ready: {
+    urlPattern: /^https:\/\/www\.lanqiao\.cn\/(?:$|courses|problems|user)/,
+    cookieName: 'Authorization',
+  },
+  cookieDomain: '.lanqiao.cn',
+  timeoutMs: 300_000,
+  async extractUsername(page: BrowserPageHandle): Promise<string | null> {
+    try {
+      return await page.evaluate<string | null>(() => {
+        const el = document.querySelector('a[href*="/user/"]') as HTMLAnchorElement | null;
+        if (!el) return null;
+        const m = el.getAttribute('href')?.match(/\/user\/(\d+)/);
+        return m ? m[1]! : null;
+      });
+    } catch {
+      return null;
+    }
+  },
+};
+
 export const platformLoginConfigs: Record<PlatformId, LoginConfig | undefined> = {
   'leetcode-cn': LEETCODE_CN,
   hdoj: HDOJ,
-  codeforces: undefined,
-  luogu: undefined,
-  poj: undefined,
-  lanqiao: undefined,
+  codeforces: CODEFORCES,
+  luogu: LUOGU,
+  poj: POJ,
+  lanqiao: LANQIAO,
 };
