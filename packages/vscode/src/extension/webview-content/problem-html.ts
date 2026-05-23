@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import type { WorkspaceMeta } from '@oj-agent/core';
+import type { WorkspaceMeta, JudgeLang } from '@oj-agent/core';
 import type { ProblemRef } from '../utils/problem-ref.js';
 import { escapeHtml } from '../utils/html.js';
 import {
@@ -16,6 +16,7 @@ export interface RenderProblemHtmlInput {
   webview: vscode.Webview;
   extensionUri: vscode.Uri;
   aiEnabled: boolean;
+  currentLang: JudgeLang;
   nonce: string;
 }
 
@@ -28,8 +29,15 @@ const PLATFORM_LABELS: Record<string, string> = {
   'lanqiao': '蓝桥',
 };
 
+const LANG_LABELS: Record<JudgeLang, string> = {
+  cpp: 'C++',
+  python3: 'Python 3',
+  java: 'Java',
+  javascript: 'JavaScript',
+};
+
 export function renderProblemHtml(input: RenderProblemHtmlInput): string {
-  const { problemRef, meta, bodyHtml, webview, extensionUri, aiEnabled, nonce } = input;
+  const { problemRef, meta, bodyHtml, webview, extensionUri, aiEnabled, currentLang, nonce } = input;
   const assetUris = getMarkdownAssetUris(webview, extensionUri);
   const cspSource = webview.cspSource;
   const csp = [
@@ -175,21 +183,28 @@ ${getMarkdownStyleBlock()}
   }
 
   .btn .icon { width: 12px; height: 12px; flex-shrink: 0; }
+  .btn.icon-only {
+    padding: 5px;
+    width: 26px;
+    height: 26px;
+    justify-content: center;
+  }
+  .btn.icon-only .icon { width: 14px; height: 14px; }
 
-  /* ── AI dropdown ── */
-  .ai-menu { position: relative; }
-  .ai-menu .chevron {
+  /* ── Menu dropdown (shared by AI / Lang) ── */
+  .menu { position: relative; }
+  .menu .chevron {
     width: 10px; height: 10px;
     transition: transform 0.15s;
     opacity: 0.7;
   }
-  .ai-menu.open .chevron { transform: rotate(180deg); }
-  .ai-menu .panel {
+  .menu.open .chevron { transform: rotate(180deg); }
+  .menu .panel {
     display: none;
     position: absolute;
     right: 0;
     top: calc(100% + 4px);
-    min-width: 160px;
+    min-width: 140px;
     background: var(--vscode-menu-background, var(--vscode-editorWidget-background, var(--oj-bg)));
     color: var(--vscode-menu-foreground, var(--oj-fg));
     border: 1px solid var(--vscode-menu-border, var(--oj-border));
@@ -198,8 +213,8 @@ ${getMarkdownStyleBlock()}
     padding: 4px;
     z-index: 10;
   }
-  .ai-menu.open .panel { display: block; }
-  .ai-menu .panel button {
+  .menu.open .panel { display: block; }
+  .menu .panel button {
     display: block;
     width: 100%;
     text-align: left;
@@ -212,11 +227,12 @@ ${getMarkdownStyleBlock()}
     cursor: pointer;
     border-radius: 3px;
   }
-  .ai-menu .panel button:hover:not(:disabled) {
+  .menu .panel button:hover:not(:disabled) {
     background: var(--vscode-menu-selectionBackground, var(--oj-hover));
     color: var(--vscode-menu-selectionForeground, inherit);
   }
-  .ai-menu .panel button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .menu .panel button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .menu .panel button.selected { background: var(--oj-hover); }
 
   /* ── Content ── 共享 .markdown-body 样式来自 markdown.ts，这里仅做题面字号微调 ── */
   #content.markdown-body {
@@ -243,14 +259,34 @@ ${getMarkdownStyleBlock()}
       <svg class="icon" viewBox="0 0 16 16" fill="currentColor"><path d="M4 3l9 5-9 5V3z"/></svg>
       运行
     </button>
-    <button class="btn" data-cmd="submission.submit" title="提交">提交</button>
+    <button class="btn" data-cmd="submission.submit" title="提交">
+      <svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3M3 8l5-5 5 5"/></svg>
+      提交
+    </button>
     <span class="sep"></span>
-    <button class="btn" data-cmd="platform.openCode" title="打开代码">代码</button>
-    <button class="btn" data-cmd="platform.refreshProblem" title="刷新题目">刷新</button>
-    <button class="btn" data-cmd="platform.openInBrowser" title="在浏览器中打开">浏览器</button>
+    <button class="btn icon-only" data-cmd="platform.openCode" title="打开代码">
+      <svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 5L2.5 8l3 3M10.5 5l3 3-3 3M9.5 4l-3 8"/></svg>
+    </button>
+    <button class="btn icon-only" data-cmd="platform.refreshProblem" title="刷新题目">
+      <svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8a5.5 5.5 0 0 1 9.4-3.9M13.5 8a5.5 5.5 0 0 1-9.4 3.9"/><path d="M12 1.5v3h-3M4 14.5v-3h3"/></svg>
+    </button>
+    <button class="btn icon-only" data-cmd="platform.openInBrowser" title="在浏览器中打开">
+      <svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2.5h4.5V7M13.5 2.5L7.5 8.5"/><path d="M12 9.5v3.5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3.5"/></svg>
+    </button>
     <span class="spacer"></span>
-    <button class="btn" data-cmd="openDebugPanel" title="调试">调试</button>
-    <div class="ai-menu" id="aiMenu">
+    <div class="menu" id="langMenu">
+      <button class="btn" id="langToggle" title="切换源代码语言">
+        <span id="langLabel">${escapeHtml(LANG_LABELS[currentLang])}</span>
+        <svg class="chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"/></svg>
+      </button>
+      <div class="panel">
+        <button data-lang="cpp"${currentLang === 'cpp' ? ' class="selected"' : ''}>C++</button>
+        <button data-lang="python3"${currentLang === 'python3' ? ' class="selected"' : ''}>Python 3</button>
+        <button data-lang="java"${currentLang === 'java' ? ' class="selected"' : ''}>Java</button>
+        <button data-lang="javascript"${currentLang === 'javascript' ? ' class="selected"' : ''}>JavaScript</button>
+      </div>
+    </div>
+    <div class="menu" id="aiMenu">
       <button class="btn" id="aiToggle" ${aiDisabled} title="AI 助手">
         AI
         <svg class="chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"/></svg>
@@ -278,15 +314,25 @@ ${getMarkdownStyleBlock()}
     });
   });
 
-  const aiMenu = document.getElementById('aiMenu');
-  const aiToggle = document.getElementById('aiToggle');
-  aiToggle.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (aiToggle.disabled) return;
-    aiMenu.classList.toggle('open');
+  // ── Generic menu toggle (shared by AI + Lang) ──
+  function bindMenu(rootId, toggleId) {
+    const root = document.getElementById(rootId);
+    const toggle = document.getElementById(toggleId);
+    toggle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (toggle.disabled) return;
+      // close other menus
+      document.querySelectorAll('.menu.open').forEach((m) => { if (m !== root) m.classList.remove('open'); });
+      root.classList.toggle('open');
+    });
+  }
+  bindMenu('aiMenu', 'aiToggle');
+  bindMenu('langMenu', 'langToggle');
+  document.addEventListener('click', () => {
+    document.querySelectorAll('.menu.open').forEach((m) => m.classList.remove('open'));
   });
-  document.addEventListener('click', () => aiMenu.classList.remove('open'));
 
+  const aiMenu = document.getElementById('aiMenu');
   document.querySelectorAll('button[data-ai]').forEach((b) => {
     b.addEventListener('click', () => {
       if (!aiEnabled || b.disabled) return;
@@ -295,8 +341,21 @@ ${getMarkdownStyleBlock()}
     });
   });
 
+  const langMenu = document.getElementById('langMenu');
+  const langLabel = document.getElementById('langLabel');
+  document.querySelectorAll('button[data-lang]').forEach((b) => {
+    b.addEventListener('click', () => {
+      const value = b.getAttribute('data-lang');
+      langMenu.classList.remove('open');
+      langLabel.textContent = b.textContent;
+      document.querySelectorAll('button[data-lang]').forEach((x) => x.classList.toggle('selected', x === b));
+      vscode.postMessage({ type: 'lang', lang: value, args: ref });
+    });
+  });
+
   function setAiEnabled(on) {
     aiEnabled = !!on;
+    const aiToggle = document.getElementById('aiToggle');
     const toggle = (b) => {
       if (aiEnabled) b.removeAttribute('disabled');
       else b.setAttribute('disabled', 'disabled');

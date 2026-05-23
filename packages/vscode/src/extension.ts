@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import type { AIContextInput, AIAction } from '@oj-agent/core';
+import type { AIContextInput, AIAction, JudgeLang } from '@oj-agent/core';
 import { buildAIServices } from './extension/services.js';
 import { registerCommands } from './extension/commands.js';
 import { updateStatusBar } from './extension/status-bar.js';
@@ -12,7 +12,7 @@ import { JudgePanelManager } from './extension/views/judge-panel.js';
 import { StatusBarManager } from './extension/views/status-bar.js';
 import { registerProblemTreeCommands } from './extension/commands/problems.js';
 import { registerPlatformCommands } from './extension/commands/platform.js';
-import { registerJudgeCommands } from './extension/commands/judge.js';
+import { registerJudgeCommands, inferLangFromDir } from './extension/commands/judge.js';
 import { registerSubmissionCommands } from './extension/commands/submission.js';
 import { registerAuthCommands } from './extension/commands/auth.js';
 import { registerStatusBarCommands } from './extension/commands/status-bar.js';
@@ -25,15 +25,17 @@ import type { ProblemRef } from './extension/utils/problem-ref.js';
 export function activate(ctx: vscode.ExtensionContext): void {
   // ---- 既有 AI 链 ----
   const aiServices = buildAIServices(ctx);
-  for (const d of registerCommands(ctx, aiServices, { profilesView: { refresh: () => { /* noop: sidebar AI view removed */ } } })) {
-    ctx.subscriptions.push(d);
-  }
   const aiStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
   ctx.subscriptions.push(aiStatusBar);
   updateStatusBar(aiStatusBar, aiServices);
 
   // ---- M1 OJ 链 ----
   const oj = buildOJServices(ctx);
+
+  // 注册 AI 相关命令(SettingsPanel 需要 oj 中的 credentialStore/configBackend)
+  for (const d of registerCommands(ctx, aiServices, { profilesView: { refresh: () => { /* noop: sidebar AI view removed */ } } }, oj)) {
+    ctx.subscriptions.push(d);
+  }
 
   // Debug 日志面板：仅 dev 模式注册命令
   const isDev = ctx.extensionMode === vscode.ExtensionMode.Development;
@@ -95,6 +97,24 @@ export function activate(ctx: vscode.ExtensionContext): void {
     extensionUri: ctx.extensionUri,
     isAIEnabled,
     resolveProblemDir: async (ref) => findProblemDir(resolveWorkspaceRoot(oj.configBackend), ref),
+    resolveCurrentLang: async (ref) => {
+      const dir = await findProblemDir(resolveWorkspaceRoot(oj.configBackend), ref);
+      const fallback = (oj.configBackend.get<JudgeLang>('ui.defaultLang') ?? 'cpp');
+      if (!dir) return fallback;
+      return inferLangFromDir(dir, fallback);
+    },
+    onLanguageChange: async (ref, lang) => {
+      const dir = await findProblemDir(resolveWorkspaceRoot(oj.configBackend), ref);
+      if (!dir) {
+        void vscode.window.showWarningMessage('题目目录未找到，请先拉取题目');
+        return;
+      }
+      await ensureSolutionFile(dir, lang);
+      const target = solutionFilenameForLang(lang);
+      const filePath = (await import('node:path')).join(dir, target);
+      const doc = await vscode.workspace.openTextDocument(filePath);
+      await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
+    },
     onCommand: (cmd, args) => {
       const id = cmd === 'platform.openCode'
         ? '' // 内部处理,见下
@@ -199,6 +219,40 @@ async function openSolutionFile(
   }
   const doc = await vscode.workspace.openTextDocument(path.join(dir, target));
   await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
+}
+
+function solutionFilenameForLang(lang: JudgeLang): string {
+  switch (lang) {
+    case 'cpp': return 'solution.cpp';
+    case 'python3': return 'solution.py';
+    case 'java': return 'Main.java';
+    case 'javascript': return 'solution.js';
+  }
+}
+
+function solutionTemplateForLang(lang: JudgeLang): string {
+  switch (lang) {
+    case 'cpp':
+      return '#include <bits/stdc++.h>\nusing namespace std;\n\nint main() {\n    \n    return 0;\n}\n';
+    case 'python3':
+      return 'def main() -> None:\n    pass\n\n\nif __name__ == "__main__":\n    main()\n';
+    case 'java':
+      return 'import java.util.*;\nimport java.io.*;\n\npublic class Main {\n    public static void main(String[] args) throws IOException {\n        \n    }\n}\n';
+    case 'javascript':
+      return '"use strict";\n\nfunction main() {\n    \n}\n\nmain();\n';
+  }
+}
+
+async function ensureSolutionFile(dir: string, lang: JudgeLang): Promise<void> {
+  const { promises: fs } = await import('node:fs');
+  const path = await import('node:path');
+  const target = solutionFilenameForLang(lang);
+  const filePath = path.join(dir, target);
+  try {
+    await fs.access(filePath);
+  } catch {
+    await fs.writeFile(filePath, solutionTemplateForLang(lang), 'utf-8');
+  }
 }
 
 export function deactivate(): void {

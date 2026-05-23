@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import type { WorkspaceMeta } from '@oj-agent/core';
+import type { WorkspaceMeta, JudgeLang } from '@oj-agent/core';
 import type { ProblemRef } from '../utils/problem-ref.js';
 import { problemRefKey } from '../utils/problem-ref.js';
 import { renderProblemHtml } from '../webview-content/problem-html.js';
@@ -14,6 +14,10 @@ export interface ProblemWebviewDeps {
   isAIEnabled: () => boolean;
   /** 题目工作区目录解析:从 ref 找到 <root>/<platform>/<id>-<slug>-<date>/。 */
   resolveProblemDir: (ref: ProblemRef) => Promise<string | undefined>;
+  /** 推断题目目录当前的源代码语言。 */
+  resolveCurrentLang: (ref: ProblemRef) => Promise<JudgeLang>;
+  /** 切换/创建语言对应的源文件。 */
+  onLanguageChange: (ref: ProblemRef, lang: JudgeLang) => Promise<void>;
   /** 命令路由:webview 发回的 { type:'cmd', cmd, args } 透传给 'ojAgent.' + cmd 。 */
   onCommand: (cmd: string, args: unknown) => void;
   /** AI 入口:四个已有命令的统一入口。 */
@@ -106,6 +110,7 @@ export class ProblemWebviewManager {
       markdownSrc = `(读取题面失败: ${e instanceof Error ? e.message : String(e)})`;
     }
     const bodyHtml = await renderMarkdown(markdownSrc);
+    const currentLang = await this.deps.resolveCurrentLang(ref);
     const html = renderProblemHtml({
       problemRef: ref,
       meta,
@@ -113,6 +118,7 @@ export class ProblemWebviewManager {
       webview: panel.webview,
       extensionUri: this.deps.extensionUri,
       aiEnabled: this.deps.isAIEnabled(),
+      currentLang,
       nonce: genNonce(),
     });
     panel.webview.html = html;
@@ -120,9 +126,16 @@ export class ProblemWebviewManager {
 
   private onMessage(ref: ProblemRef, msg: unknown): void {
     if (!msg || typeof msg !== 'object') return;
-    const m = msg as { type?: string; cmd?: string; kind?: string; args?: unknown };
+    const m = msg as { type?: string; cmd?: string; kind?: string; lang?: string; args?: unknown };
     if (m.type === 'cmd' && typeof m.cmd === 'string') {
       this.deps.onCommand(m.cmd, m.args ?? ref);
+      return;
+    }
+    if (m.type === 'lang' && typeof m.lang === 'string') {
+      const valid: JudgeLang[] = ['cpp', 'python3', 'java', 'javascript'];
+      if (valid.includes(m.lang as JudgeLang)) {
+        void this.deps.onLanguageChange(ref, m.lang as JudgeLang);
+      }
       return;
     }
     if (m.type === 'ai' && typeof m.kind === 'string') {
