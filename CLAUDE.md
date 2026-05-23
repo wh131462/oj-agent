@@ -125,12 +125,22 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 ## Important Constraints (Network Access Rules)
 
-1. Your built-in `fetch / WebFetch / any internal network request capability` must be treated as **completely unavailable**. You are not allowed to initiate any direct HTTP requests.
+**Scope clarification:** This section governs **Claude Code's own tool-calling behavior at runtime** — specifically, it forbids invoking the built-in **`WebFetch`** tool and the built-in **`WebSearch`** tool to fetch information for yourself during a task.
+
+It does **NOT** restrict any of the following:
+- ✅ **Code you write for the user** — `fetch()`, `axios`, `requests`, `http.get`, `XMLHttpRequest`, `URLSession`, any HTTP client library, etc. used inside source files are completely unaffected. This rule is about tool calls, not about code semantics.
+- ✅ Network requests made internally by **MCP servers** (e.g. `chrome_devtools`, `fetch-mcp`, `context7`) — these are explicitly allowed and preferred.
+- ✅ Network operations performed by **Skills**.
+- ✅ HTTP clients invoked via **`Bash`** (e.g. `curl`, `wget`) when explicitly required by a task (e.g. running a project's own scripts, test suites, or build steps).
+
+In short: **don't call `WebFetch` / `WebSearch` as tools**. Writing or running code that performs HTTP requests is fine.
+
+1. Claude Code's built-in **`WebFetch`** and **`WebSearch`** tools must be treated as **completely unavailable**. You are not allowed to invoke them to initiate direct HTTP requests or web searches.
 2. When network access is required, select tools in the following priority order:
    - **Preferred**: MCP `chrome_devtools` (real-time in-browser network data)
-   - **Next**: Any installed network-capable MCP tools (e.g. `fetch-mcp`, `http-client`, etc.)
+   - **Next**: Any installed network-capable MCP tools (e.g. `fetch-mcp`, `http-client`, `context7`, etc.)
    - **Then**: Any installed relevant Skill
-   - **Fallback**: If none of the above are available, prompt the user to install the appropriate MCP or Skill. Do NOT bypass this by falling back to built-in capabilities.
+   - **Fallback**: If none of the above are available, prompt the user to install the appropriate MCP or Skill. Do NOT bypass this by falling back to `WebFetch` / `WebSearch`.
 3. Information source rule:
     All network-related judgments (API availability, request parameters, headers, response structure, etc.)
     → must rely solely on **real records from the selected tool** as the only source of truth.
