@@ -61,3 +61,34 @@ test('detectProblemDir: 形态匹配但无 meta.json,不算工作区', async () 
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test('detectProblemDir: Codeforces 非纯数字题号', async () => {
+  const root = await mkTmp();
+  try {
+    const dir = path.join(root, 'codeforces', '1900A-Cover-in-Water-2026-05-22');
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, 'meta.json'), '{}');
+    const det = await detectProblemDir(dir);
+    assert.ok(det);
+    assert.equal(det!.platform, 'codeforces');
+    assert.equal(det!.id, '1900A');
+    assert.equal(det!.slug, 'Cover-in-Water');
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('detectProblemDir: 洛谷 P 前缀题号', async () => {
+  const root = await mkTmp();
+  try {
+    const dir = path.join(root, 'luogu', 'P1001-A+B-2026-05-22');
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, 'meta.json'), '{}');
+    const det = await detectProblemDir(dir);
+    assert.ok(det);
+    assert.equal(det!.platform, 'luogu');
+    assert.equal(det!.id, 'P1001');
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

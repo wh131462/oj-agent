@@ -10,7 +10,14 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import * as toml from '@iarna/toml';
 import type { ConfigBackend } from '@oj-agent/core';
+import type { SharedConfigStore, SharedAIConfig } from '@oj-agent/core';
 import { UsageError } from '../utils/args.js';
+
+/** AI 配置字段前缀，这些字段经由 SharedConfigStore 读写 */
+const AI_SHARED_KEYS = new Set([
+  'ai.profiles',
+  'ai.activeProfileId',
+]);
 
 export type ConfigValue = string | number | boolean | string[] | Record<string, unknown> | unknown[];
 
@@ -61,9 +68,29 @@ export class TomlConfigBackend implements ConfigBackend {
   private cache: Record<string, unknown> | null = null;
   private readonly filePath: string;
   private loaded = false;
+  private readonly sharedConfigStore?: SharedConfigStore;
+  private aiCache?: SharedAIConfig;
+  private readonly changeListeners = new Set<(key: string) => void>();
 
-  constructor(opts: { configPath?: string } = {}) {
+  constructor(opts: { configPath?: string; sharedConfigStore?: SharedConfigStore } = {}) {
     this.filePath = resolveConfigPath({ explicit: opts.configPath });
+    this.sharedConfigStore = opts.sharedConfigStore;
+    if (this.sharedConfigStore) {
+      this.sharedConfigStore.watch((event) => {
+        if (event.type === 'ai-config') {
+          this.aiCache = undefined;
+          for (const l of this.changeListeners) {
+            try { l('ai'); } catch {}
+          }
+        }
+      });
+    }
+  }
+
+  /** 订阅 AI 配置变更（来自 SharedConfigStore）。 */
+  onChange(listener: (key: string) => void): { dispose: () => void } {
+    this.changeListeners.add(listener);
+    return { dispose: () => this.changeListeners.delete(listener) };
   }
 
   get path(): string {
@@ -72,12 +99,35 @@ export class TomlConfigBackend implements ConfigBackend {
 
   /** ConfigBackend.get<T>(key):返回 raw 值或 undefined。 */
   get<T = unknown>(key: string): T | undefined {
+    if (this.sharedConfigStore && AI_SHARED_KEYS.has(key)) {
+      const ai = this.aiCache;
+      if (ai) {
+        if (key === 'ai.profiles') return ai.profiles as unknown as T;
+        if (key === 'ai.activeProfileId') return ai.activeProfileId as unknown as T;
+      }
+      // 异步读取尚未完成时回退到 TOML
+    }
     this.ensureLoadedSync();
     return getDeep(this.cache!, key) as T | undefined;
   }
 
+  /** 异步预加载 AI 配置到内存 cache（CLI 启动时调用）。 */
+  async preloadAIConfig(): Promise<void> {
+    if (!this.sharedConfigStore) return;
+    this.aiCache = await this.sharedConfigStore.getAIConfig();
+  }
+
   /** ConfigBackend.update<T>(key, value):同步更新 + 持久化。 */
   async update<T = unknown>(key: string, value: T): Promise<void> {
+    if (this.sharedConfigStore && AI_SHARED_KEYS.has(key)) {
+      const current = await this.sharedConfigStore.getAIConfig();
+      const patch: Partial<SharedAIConfig> = {};
+      if (key === 'ai.profiles') patch.profiles = value as SharedAIConfig['profiles'];
+      if (key === 'ai.activeProfileId') patch.activeProfileId = value as string;
+      await this.sharedConfigStore.setAIConfig({ ...current, ...patch });
+      this.aiCache = { ...current, ...patch };
+      return;
+    }
     await this.ensureLoaded();
     setDeep(this.cache!, key, value as unknown);
     await this.save();
@@ -101,6 +151,15 @@ export class TomlConfigBackend implements ConfigBackend {
       throw new UsageError(`未知配置项: ${key}`);
     }
     const value = coerce(spec, rawValue, key);
+    if (this.sharedConfigStore && AI_SHARED_KEYS.has(key)) {
+      const current = await this.sharedConfigStore.getAIConfig();
+      const patch: Partial<import('@oj-agent/core').SharedAIConfig> = {};
+      if (key === 'ai.profiles') patch.profiles = value as import('@oj-agent/core').SharedAIConfig['profiles'];
+      if (key === 'ai.activeProfileId') patch.activeProfileId = value as string;
+      await this.sharedConfigStore.setAIConfig({ ...current, ...patch });
+      this.aiCache = { ...current, ...patch };
+      return;
+    }
     await this.ensureLoaded();
     setDeep(this.cache!, key, value);
     await this.save();

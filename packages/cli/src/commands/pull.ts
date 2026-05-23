@@ -30,11 +30,16 @@ export const pullCommand: CommandModule = {
       '<ref> 可为:',
       '  URL                     https://leetcode.cn/problems/two-sum/',
       '                          http://acm.hdu.edu.cn/showproblem.php?pid=1000',
-      '  短形式                  leetcode-cn/two-sum  |  hdoj/1000',
+      '                          https://codeforces.com/problemset/problem/1900/A',
+      '                          https://www.luogu.com.cn/problem/P1001',
+      '                          http://poj.org/problem?id=1000',
+      '                          https://www.lanqiao.cn/problems/504/',
+      '  短形式                  leetcode-cn/two-sum  |  hdoj/1000  |  codeforces/1900A',
+      '                          luogu/P1001  |  poj/1000  |  lanqiao/504',
       '',
       'Options:',
       '  --lang cpp|python3|java|javascript   写入哪种 solution.* 模板',
-      '  --open                  写盘后用系统打开 problem.md',
+      '  --open                  写盘后用系统打开题目目录',
       '  --refresh               若已存在则强制刷新(不询问)',
       '  --json                  机器可读输出',
     ].join('\n');
@@ -134,8 +139,20 @@ function parseRef(ref: string): { platform: PlatformId; id: string } | undefined
   // HDOJ URL
   const hd = ref.match(/acm\.hdu\.edu\.cn\/(?:showproblem\.php)?.*?pid=(\d+)/);
   if (hd) return { platform: 'hdoj', id: hd[1]! };
+  // Codeforces URL：/problemset/problem/{cid}/{idx} 或 /contest/{cid}/problem/{idx}
+  const cf = ref.match(/codeforces\.com\/(?:problemset\/problem|contest\/[^/]+\/problem)\/(\d+)\/([A-Z]\d?)/i);
+  if (cf) return { platform: 'codeforces', id: `${cf[1]}${cf[2]!.toUpperCase()}` };
+  // 洛谷 URL：/problem/{pid}
+  const lg = ref.match(/luogu\.com\.cn\/problem\/([A-Za-z0-9]+)/);
+  if (lg) return { platform: 'luogu', id: lg[1]! };
+  // POJ URL：/problem?id=xxx
+  const poj = ref.match(/poj\.org\/problem\?id=(\d+)/);
+  if (poj) return { platform: 'poj', id: poj[1]! };
+  // 蓝桥 URL：/problems/{id}/
+  const lq = ref.match(/lanqiao\.cn\/problems\/(\d+)/);
+  if (lq) return { platform: 'lanqiao', id: lq[1]! };
   // 短形式 platform/id
-  const m = ref.match(/^(leetcode-cn|hdoj)\/(.+)$/);
+  const m = ref.match(/^(leetcode-cn|hdoj|codeforces|luogu|poj|lanqiao)\/(.+)$/);
   if (m) return { platform: m[1] as PlatformId, id: m[2]! };
   return undefined;
 }

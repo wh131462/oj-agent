@@ -6,7 +6,7 @@
 import * as path from 'node:path';
 import { promises as fs } from 'node:fs';
 
-const PLATFORMS = ['leetcode-cn', 'hdoj'];
+const PLATFORMS = ['leetcode-cn', 'hdoj', 'codeforces', 'luogu', 'poj', 'lanqiao'];
 
 export interface DetectedProblemDir {
   problemDir: string;
@@ -21,7 +21,7 @@ export async function detectProblemDir(start: string): Promise<DetectedProblemDi
   while (true) {
     const base = path.basename(cur);
     const parent = path.basename(path.dirname(cur));
-    const m = base.match(/^(\d+)-(.+)-(\d{4}-\d{2}-\d{2})$/);
+    const m = base.match(/^([^-]+)-(.+)-(\d{4}-\d{2}-\d{2})$/);
     if (m && PLATFORMS.includes(parent)) {
       // 校验存在 meta.json
       try {

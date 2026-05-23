@@ -10,7 +10,7 @@ import { promptConfirm } from '../utils/prompt.js';
 import { ProgressLine } from '../render/progress.js';
 import { ansiEnabled } from '../utils/globals.js';
 import { colorize } from '../render/ansi.js';
-import type { JudgeLang } from '@oj-agent/core';
+import type { JudgeLang, PlatformId } from '@oj-agent/core';
 
 const LANG_FILENAME: Record<JudgeLang, string> = {
   cpp: 'solution.cpp',
@@ -39,7 +39,7 @@ export const submitCommand: CommandModule = {
   async run(ctx, args) {
     const cwd = process.cwd();
     let problemDir: string;
-    let platform: 'leetcode-cn' | 'hdoj';
+    let platform: PlatformId;
     let problemId: string;
 
     if (args.positional[0]) {
@@ -47,7 +47,7 @@ export const submitCommand: CommandModule = {
       // 从路径回溯 platform/id
       const det = await detectProblemDir(problemDir);
       if (!det) throw new UsageError('指定 path 不在合法 oja 工作区结构');
-      platform = det.platform as 'leetcode-cn' | 'hdoj';
+      platform = det.platform as PlatformId;
       problemId = det.id;
     } else {
       const det = await detectProblemDir(cwd);
@@ -55,7 +55,7 @@ export const submitCommand: CommandModule = {
         throw new UsageError('当前目录不在 oja 工作区内,请先 oja pull,或指定 problemDir 路径');
       }
       problemDir = det.problemDir;
-      platform = det.platform as 'leetcode-cn' | 'hdoj';
+      platform = det.platform as PlatformId;
       problemId = det.id;
     }
 

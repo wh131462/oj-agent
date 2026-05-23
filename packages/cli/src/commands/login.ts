@@ -47,8 +47,17 @@ export const loginCommand: CommandModule = {
   async run(ctx, args) {
     const platform = args.positional[0] as PlatformId | undefined;
     if (!platform) throw new UsageError('缺少参数: <platform>');
-    if (platform !== 'leetcode-cn' && platform !== 'hdoj') {
-      throw new UsageError(`未知平台: ${platform}(仅支持 leetcode-cn / hdoj)`);
+    if (
+      platform !== 'leetcode-cn' &&
+      platform !== 'hdoj' &&
+      platform !== 'codeforces' &&
+      platform !== 'luogu' &&
+      platform !== 'poj' &&
+      platform !== 'lanqiao'
+    ) {
+      throw new UsageError(
+        `未知平台: ${platform}（支持: leetcode-cn / hdoj / codeforces / luogu / poj / lanqiao）`,
+      );
     }
 
     const rawCookie = typeof args.flags.cookie === 'string' ? args.flags.cookie : undefined;
@@ -197,7 +206,7 @@ async function runBrowser(
   }
 }
 
-/** M1 粘贴流程(LeetCode CN 两步 / HDOJ 账号密码)。 */
+/** M1 粘贴流程(LeetCode CN 两步 / HDOJ 账号密码 / 其他平台粘贴 cookie)。 */
 async function runManual(ctx: CliContext, platform: PlatformId): Promise<number> {
   const ansi = ansiEnabled(ctx.globals);
   if (platform === 'leetcode-cn') {
@@ -225,6 +234,16 @@ async function runManual(ctx: CliContext, platform: PlatformId): Promise<number>
     return 0;
   }
 
+  if (platform === 'hdoj') {
+    return runHdojManual(ctx);
+  }
+
+  // 其他平台（codeforces / luogu / poj / lanqiao）走通用粘贴流程
+  return runGenericManual(ctx, platform);
+}
+
+async function runHdojManual(ctx: CliContext): Promise<number> {
+  const ansi = ansiEnabled(ctx.globals);
   // HDOJ 粘贴 / 账号密码
   const username = await promptText('HDOJ 用户名: ');
   const password = await promptText('HDOJ 密码: ', { hidden: true });
@@ -264,9 +283,40 @@ async function runManual(ctx: CliContext, platform: PlatformId): Promise<number>
     return 1;
   }
   if (ctx.globals.json) {
-    process.stdout.write(JSON.stringify({ ok: true, platform, mode: 'manual', username }) + '\n');
+    process.stdout.write(JSON.stringify({ ok: true, platform: 'hdoj', mode: 'manual', username }) + '\n');
   } else {
     process.stderr.write(colorize(ansi, 'green', `✓ HDOJ 登录成功(${username})\n`));
   }
   return 0;
 }
+
+/**
+ * 通用粘贴流程：用户在浏览器登录后粘贴 cookie（或 lanqiao 的 JWT）。
+ * 适配 codeforces / luogu / poj / lanqiao。
+ */
+async function runGenericManual(ctx: CliContext, platform: PlatformId): Promise<number> {
+  const ansi = ansiEnabled(ctx.globals);
+  const promptMsg =
+    platform === 'lanqiao'
+      ? '蓝桥云课 JWT (从浏览器 localStorage / Authorization header 取得): '
+      : `${platform} cookie (整段，含 SESSION/JSESSIONID/PHPSESSID 等): `;
+  const raw = await promptText(promptMsg, { hidden: true });
+  if (!raw) {
+    if (!ctx.globals.json) process.stderr.write('不能为空\n');
+    return 3;
+  }
+  const cred =
+    platform === 'lanqiao'
+      ? { platform, token: raw }
+      : { platform, cookie: raw };
+  await ctx.credentialStore.set(platform, cred);
+  // 这些平台暂未在 CredChecker 中实现校验逻辑，写入后即认为成功；
+  // 后续真实调用 listProblems / submit 时若 token 无效会抛 AUTH_REQUIRED。
+  if (ctx.globals.json) {
+    process.stdout.write(JSON.stringify({ ok: true, platform, mode: 'manual' }) + '\n');
+  } else {
+    process.stderr.write(colorize(ansi, 'green', `✓ ${platform} 凭证已写入（请通过 oja list ${platform} 验证）\n`));
+  }
+  return 0;
+}
+

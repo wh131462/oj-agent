@@ -8,7 +8,7 @@ import { colorize } from '../render/ansi.js';
 import type { PlatformId } from '@oj-agent/core';
 
 const VERSION = '0.1.0';
-const PLATFORMS: PlatformId[] = ['leetcode-cn', 'hdoj'];
+const PLATFORMS: PlatformId[] = ['leetcode-cn', 'hdoj', 'codeforces', 'luogu', 'poj', 'lanqiao'];
 
 export const statusCommand: CommandModule = {
   name: 'status',
@@ -22,7 +22,8 @@ export const statusCommand: CommandModule = {
     const platforms: Record<string, { status: string; username?: string }> = {};
     for (const p of PLATFORMS) {
       const cred = await ctx.credentialStore.get(p);
-      if (!cred?.cookie) {
+      const hasCred = !!(cred?.cookie || cred?.token);
+      if (!hasCred) {
         platforms[p] = { status: 'unauthenticated' };
         continue;
       }

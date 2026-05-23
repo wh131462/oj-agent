@@ -8,7 +8,14 @@ import { ansiEnabled } from '../utils/globals.js';
 import { colorize } from '../render/ansi.js';
 import type { PlatformId, PlatformListQuery } from '@oj-agent/core';
 
-const PLATFORMS: PlatformId[] = ['leetcode-cn', 'hdoj'];
+const PLATFORMS: PlatformId[] = [
+  'leetcode-cn',
+  'hdoj',
+  'codeforces',
+  'luogu',
+  'poj',
+  'lanqiao',
+];
 const ALLOWED_DIFFICULTY = ['Easy', 'Medium', 'Hard'];
 
 export const listCommand: CommandModule = {

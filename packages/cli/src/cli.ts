@@ -16,6 +16,7 @@ import { pullCommand } from './commands/pull.js';
 import { testCommand } from './commands/test.js';
 import { submitCommand } from './commands/submit.js';
 import { configCommand } from './commands/config.js';
+import { platformsCommand } from './commands/platforms.js';
 import { toolchainCommand } from './commands/toolchain.js';
 
 const VERSION = '0.1.0';
@@ -29,6 +30,7 @@ const COMMANDS: CommandModule[] = [
   testCommand,
   submitCommand,
   configCommand,
+  platformsCommand,
   toolchainCommand,
 ];
 

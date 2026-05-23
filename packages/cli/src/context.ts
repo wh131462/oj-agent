@@ -8,6 +8,7 @@ import {
   PlatformAdapterRegistry,
   RateLimiter,
   SecretCredentialStore,
+  SharedConfigStore,
   WorkspaceManager,
   JudgeRunner,
   SubmissionRunner,
@@ -25,6 +26,7 @@ import type { GlobalOptions } from './utils/globals.js';
 
 export interface CliContext {
   config: TomlConfigBackend;
+  sharedConfigStore: SharedConfigStore;
   secretInfo: SecretBackendInfo;
   credentialStore: SecretCredentialStore;
   httpClient: HttpClient;
@@ -41,7 +43,9 @@ export interface CliContext {
 
 export async function createContext(globals: GlobalOptions): Promise<CliContext> {
   const configPath = resolveConfigPath({ explicit: globals.config });
-  const config = new TomlConfigBackend({ configPath });
+  const sharedConfigStore = new SharedConfigStore();
+  const config = new TomlConfigBackend({ configPath, sharedConfigStore });
+  await config.preloadAIConfig();
   const logger = new TerminalLogger(globals);
   const secretInfo = await createSecretBackend({ configPath });
 
@@ -49,7 +53,9 @@ export async function createContext(globals: GlobalOptions): Promise<CliContext>
     process.stderr.write('[oja] ' + secretInfo.warning + '\n');
   }
 
-  const credentialStore = new SecretCredentialStore(secretInfo.backend);
+  const credentialStore = new SecretCredentialStore(secretInfo.backend, { sharedConfigStore });
+  // 启动时同步从 SharedConfigStore 加载已有 session 到 SecretBackend
+  await credentialStore.loadFromSharedStore();
 
   // 限速:按平台读取配置
   const rateLimiter = new RateLimiter((bucket) => {
@@ -76,8 +82,15 @@ export async function createContext(globals: GlobalOptions): Promise<CliContext>
   const submission = new SubmissionRunner({ registry, credentialStore, logger });
   const credChecker = new CredentialChecker(httpClient);
 
+  // CLI 是短生命周期：进程退出时释放 watcher
+  const cleanup = (): void => { void sharedConfigStore.dispose(); };
+  process.once('exit', cleanup);
+  process.once('SIGINT', () => { cleanup(); process.exit(130); });
+  process.once('SIGTERM', () => { cleanup(); process.exit(143); });
+
   return {
     config,
+    sharedConfigStore,
     secretInfo,
     credentialStore,
     httpClient,
