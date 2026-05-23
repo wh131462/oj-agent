@@ -16,10 +16,13 @@ import {
 import { VSCodeSecretBackend } from './backends/vscode-secret.js';
 import { VSCodeConfigBackend } from './backends/vscode-config.js';
 import { VSCodeOutputChannelLogger } from './backends/vscode-output-channel-logger.js';
+import { DebugLogStore } from './views/debug-panel.js';
+import { SharedConfigStore } from '@oj-agent/core';
 
 export interface OJServices {
   logger: VSCodeOutputChannelLogger;
   loggerBackend: LoggerBackend;
+  debugLogs: DebugLogStore;
   secretBackend: VSCodeSecretBackend;
   configBackend: VSCodeConfigBackend;
   credentialStore: CredentialStore;
@@ -42,10 +45,40 @@ export function buildOJServices(ctx: vscode.ExtensionContext): OJServices {
   const logger = new VSCodeOutputChannelLogger('OJ-Agent');
   ctx.subscriptions.push({ dispose: () => logger.dispose() });
 
-  const secretBackend = new VSCodeSecretBackend(ctx.secrets);
-  const configBackend = new VSCodeConfigBackend('ojAgent');
+  const debugLogs = new DebugLogStore();
 
-  const credentialStore = new SecretCredentialStore(secretBackend);
+  const loggerBackend: LoggerBackend = {
+    info(scope, msg, extra) {
+      logger.info(scope, msg, extra);
+      debugLogs.info(scope, msg, extra);
+    },
+    warn(scope, msg, extra) {
+      logger.warn(scope, msg, extra);
+      debugLogs.warn(scope, msg, extra);
+    },
+    error(scope, msg, err) {
+      logger.error(scope, msg, err);
+      debugLogs.error(scope, msg, err);
+    },
+  };
+
+  // 任务 5.1: 先实例化 SharedConfigStore
+  const sharedConfigStore = new SharedConfigStore();
+  ctx.subscriptions.push({ dispose: () => void sharedConfigStore.dispose() });
+
+  // 任务 4.4: 注册 SharedConfigStore onChange，文件变更时通知 VSCode 侧
+  ctx.subscriptions.push(
+    sharedConfigStore.watch((event) => {
+      if (event.type === 'session') {
+        void vscode.commands.executeCommand('ojAgent.internal.refreshCredentials');
+      }
+    }),
+  );
+
+  const secretBackend = new VSCodeSecretBackend(ctx.secrets, sharedConfigStore);
+  const configBackend = new VSCodeConfigBackend('ojAgent', { sharedConfigStore });
+
+  const credentialStore = new SecretCredentialStore(secretBackend, { sharedConfigStore });
 
   const rateLimiter = new RateLimiter((bucket: string) => {
     const v = configBackend.get<number>(`http.rateLimit.${bucket}`);
@@ -71,20 +104,21 @@ export function buildOJServices(ctx: vscode.ExtensionContext): OJServices {
     rateLimiter,
   });
 
-  const workspaceManager = new WorkspaceManager({ logger });
+  const workspaceManager = new WorkspaceManager({ logger: loggerBackend });
 
-  const toolchainProbe = new ToolchainProbe({ logger });
-  const judgeRunner = new JudgeRunner({ logger, toolchain: toolchainProbe });
+  const toolchainProbe = new ToolchainProbe({ logger: loggerBackend });
+  const judgeRunner = new JudgeRunner({ logger: loggerBackend, toolchain: toolchainProbe });
 
   const submissionRunner = new SubmissionRunner({
     registry,
     credentialStore,
-    logger,
+    logger: loggerBackend,
   });
 
   return {
     logger,
-    loggerBackend: logger,
+    loggerBackend,
+    debugLogs,
     secretBackend,
     configBackend,
     credentialStore,

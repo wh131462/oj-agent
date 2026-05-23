@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import { ProfileStore, ApiKeyVault, RateLimiter, AIRunner } from '@oj-agent/core';
 
-const CFG_NS = 'ojAgent.ai';
+const CFG_NS = 'ojAgent';
+const CFG_NS_AI = 'ojAgent.ai';
 
 class VSCodeConfigBackend {
   get<T>(key: string): T | undefined {
@@ -38,7 +39,7 @@ export function buildAIServices(ctx: vscode.ExtensionContext): AIServices {
   const profiles = new ProfileStore(new VSCodeConfigBackend());
   const vault = new ApiKeyVault(new VSCodeSecretBackend(ctx.secrets));
   const limiter = new RateLimiter((_bucket) => {
-    const v = vscode.workspace.getConfiguration(CFG_NS).get<number>('rateLimit.perMinute');
+    const v = vscode.workspace.getConfiguration(CFG_NS_AI).get<number>('rateLimit.perMinute');
     return typeof v === 'number' && v > 0 ? v : 20;
   });
   const runner = new AIRunner(limiter);
@@ -46,6 +47,6 @@ export function buildAIServices(ctx: vscode.ExtensionContext): AIServices {
 }
 
 export function isRedactEnabled(): boolean {
-  const v = vscode.workspace.getConfiguration(CFG_NS).get<boolean>('privacy.redact');
+  const v = vscode.workspace.getConfiguration(CFG_NS_AI).get<boolean>('privacy.redact');
   return v !== false;
 }

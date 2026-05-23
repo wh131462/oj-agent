@@ -4,7 +4,6 @@ import { buildAIServices } from './extension/services.js';
 import { registerCommands } from './extension/commands.js';
 import { updateStatusBar } from './extension/status-bar.js';
 import { AIPanel } from './extension/ai-panel.js';
-import { AIActionsProvider, AIProfilesProvider } from './extension/tree-providers.js';
 
 import { buildOJServices, resolveWorkspaceRoot } from './extension/oj-services.js';
 import { ProblemTreeDataProvider } from './extension/views/problem-tree.js';
@@ -19,19 +18,14 @@ import { registerAuthCommands } from './extension/commands/auth.js';
 import { registerStatusBarCommands } from './extension/commands/status-bar.js';
 import { ProblemContextProvider } from './extension/context-providers/problem.js';
 import { TestCaseContextProvider } from './extension/context-providers/test-case.js';
+import { DebugWebviewPanel } from './extension/views/debug-webview-panel.js';
 import { findProblemDir } from './extension/utils/workspace-resolver.js';
 import type { ProblemRef } from './extension/utils/problem-ref.js';
 
 export function activate(ctx: vscode.ExtensionContext): void {
   // ---- 既有 AI 链 ----
   const aiServices = buildAIServices(ctx);
-  const profilesProvider = new AIProfilesProvider(aiServices);
-  const actionsProvider = new AIActionsProvider();
-  ctx.subscriptions.push(
-    vscode.window.registerTreeDataProvider('ojAgent.aiProfiles', profilesProvider),
-    vscode.window.registerTreeDataProvider('ojAgent.aiActions', actionsProvider),
-  );
-  for (const d of registerCommands(ctx, aiServices, { profilesView: profilesProvider })) {
+  for (const d of registerCommands(ctx, aiServices, { profilesView: { refresh: () => { /* noop: sidebar AI view removed */ } } })) {
     ctx.subscriptions.push(d);
   }
   const aiStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
@@ -40,6 +34,16 @@ export function activate(ctx: vscode.ExtensionContext): void {
 
   // ---- M1 OJ 链 ----
   const oj = buildOJServices(ctx);
+
+  // Debug 日志面板：仅 dev 模式注册命令
+  const isDev = ctx.extensionMode === vscode.ExtensionMode.Development;
+  if (isDev) {
+    ctx.subscriptions.push(
+      vscode.commands.registerCommand('ojAgent.openDebugPanel', () => {
+        DebugWebviewPanel.show(oj.debugLogs);
+      }),
+    );
+  }
 
   // AI 启用判断
   const isAIEnabled = (): boolean => !!aiServices.profiles.getActive();
@@ -169,7 +173,6 @@ export function activate(ctx: vscode.ExtensionContext): void {
       if (e.affectsConfiguration('ojAgent.ai')) {
         updateStatusBar(aiStatusBar, aiServices);
         AIPanel.refreshState(aiServices);
-        profilesProvider.refresh();
       }
     }),
   );

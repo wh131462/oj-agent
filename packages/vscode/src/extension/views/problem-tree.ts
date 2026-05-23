@@ -13,7 +13,10 @@ import { getEnabledPlatforms } from '../oj-services.js';
 export type ProblemTreeNode =
   | { kind: 'platform'; platform: PlatformId }
   | { kind: 'problem'; platform: PlatformId; summary: PlatformProblemSummary }
+  | { kind: 'action'; platform: PlatformId; summary: PlatformProblemSummary; action: ProblemAction }
   | { kind: 'empty'; platform: PlatformId; reason: 'loading' | 'no-data' | 'not-logged-in' | 'error'; message?: string };
+
+type ProblemAction = 'pull' | 'openProblem' | 'openCode' | 'runTest' | 'submit';
 
 interface PlatformState {
   query: PlatformListQuery;
@@ -31,6 +34,16 @@ function queryStateKey(platform: PlatformId): string {
   return `ojAgent.problems.${platform}.query`;
 }
 
+const ACTION_CONFIG: Record<ProblemAction, { label: string; icon: string; command: string }> = {
+  pull:        { label: '拉取到本地',     icon: 'cloud-download',  command: 'ojAgent.platform.pullProblem' },
+  openProblem: { label: '打开题面',       icon: 'preview',         command: 'ojAgent.platform.openProblemView' },
+  openCode:    { label: '打开解题代码',   icon: 'file-code',       command: 'ojAgent.platform.openCode' },
+  runTest:     { label: '运行测试',       icon: 'play',            command: 'ojAgent.judge.runAll' },
+  submit:      { label: '提交',           icon: 'cloud-upload',    command: 'ojAgent.submission.submit' },
+};
+
+const PROBLEM_ACTIONS: ProblemAction[] = ['pull', 'openProblem', 'openCode', 'runTest', 'submit'];
+
 export class ProblemTreeDataProvider implements vscode.TreeDataProvider<ProblemTreeNode> {
   private readonly emitter = new vscode.EventEmitter<ProblemTreeNode | undefined>();
   readonly onDidChangeTreeData = this.emitter.event;
@@ -45,7 +58,6 @@ export class ProblemTreeDataProvider implements vscode.TreeDataProvider<ProblemT
   ) {}
 
   refresh(): void {
-    // 清缓存,强制下次 getChildren 重新拉取
     for (const s of this.states.values()) s.cache = undefined;
     this.emitter.fire(undefined);
   }
@@ -56,7 +68,6 @@ export class ProblemTreeDataProvider implements vscode.TreeDataProvider<ProblemT
     this.emitter.fire(undefined);
   }
 
-  /** 更新平台 query,持久化到 workspaceState 并刷新。 */
   async setQuery(platform: PlatformId, query: Partial<PlatformListQuery>): Promise<void> {
     const s = this.getOrInitState(platform);
     s.query = { ...s.query, ...query };
@@ -92,26 +103,37 @@ export class ProblemTreeDataProvider implements vscode.TreeDataProvider<ProblemT
     if (node.kind === 'platform') {
       const s = this.getOrInitState(node.platform);
       const item = new vscode.TreeItem(this.platformLabel(node.platform), vscode.TreeItemCollapsibleState.Collapsed);
-      item.iconPath = new vscode.ThemeIcon(s.credStatus === 'valid' ? 'account' : 'account');
+      item.iconPath = new vscode.ThemeIcon('account');
       item.description = this.platformDesc(s);
       item.tooltip = this.platformTooltip(node.platform, s);
       item.contextValue = s.credStatus === 'valid' ? 'platform-loggedin' : 'platform-loggedout';
       return item;
     }
+
+    if (node.kind === 'action') {
+      const cfg = ACTION_CONFIG[node.action];
+      const ref = { platform: node.platform, id: node.summary.id, slug: extractSlug(node.summary.url) };
+      const item = new vscode.TreeItem(cfg.label, vscode.TreeItemCollapsibleState.None);
+      item.iconPath = new vscode.ThemeIcon(cfg.icon);
+      item.contextValue = `problem-action-${node.action}`;
+      item.command = {
+        command: cfg.command,
+        title: cfg.label,
+        arguments: [ref],
+      };
+      return item;
+    }
+
     if (node.kind === 'problem') {
       const sum = node.summary;
-      const item = new vscode.TreeItem(`${sum.id}. ${sum.title}`, vscode.TreeItemCollapsibleState.None);
+      const item = new vscode.TreeItem(`${sum.id}. ${sum.title}`, vscode.TreeItemCollapsibleState.Collapsed);
       item.iconPath = new vscode.ThemeIcon('symbol-event', this.difficultyColor(sum.difficulty));
       item.description = [sum.difficulty, (sum.tags ?? []).slice(0, 3).join(',')].filter(Boolean).join(' · ');
       item.tooltip = sum.url ?? '';
       item.contextValue = 'problem';
-      item.command = {
-        command: 'ojAgent.platform.pullProblem',
-        title: '拉取到本地',
-        arguments: [{ platform: node.platform, id: sum.id, slug: extractSlug(sum.url) }],
-      };
       return item;
     }
+
     // empty
     let label: string;
     switch (node.reason) {
@@ -137,10 +159,10 @@ export class ProblemTreeDataProvider implements vscode.TreeDataProvider<ProblemT
   async getChildren(node?: ProblemTreeNode): Promise<ProblemTreeNode[]> {
     if (!node) {
       const enabled = getEnabledPlatforms(this.configBackend);
-      // 异步触发凭证探活,不阻塞首屏
       for (const p of enabled) this.kickoffCredCheck(p);
       return enabled.map((platform): ProblemTreeNode => ({ kind: 'platform', platform }));
     }
+
     if (node.kind === 'platform') {
       const s = this.getOrInitState(node.platform);
       if (s.cache) {
@@ -162,7 +184,6 @@ export class ProblemTreeDataProvider implements vscode.TreeDataProvider<ProblemT
       } catch (e) {
         s.cache = [];
         s.lastError = e instanceof Error ? e.message : String(e);
-        // 401/AUTH_REQUIRED 时提示未登录
         if (/AUTH_REQUIRED|401|未登录/i.test(s.lastError)) {
           return [{ kind: 'empty', platform: node.platform, reason: 'not-logged-in' }];
         }
@@ -173,6 +194,17 @@ export class ProblemTreeDataProvider implements vscode.TreeDataProvider<ProblemT
       if (s.cache.length === 0) return [{ kind: 'empty', platform: node.platform, reason: 'no-data' }];
       return s.cache.map((summary): ProblemTreeNode => ({ kind: 'problem', platform: node.platform, summary }));
     }
+
+    if (node.kind === 'problem') {
+      // 展开 5 个 action 子节点
+      return PROBLEM_ACTIONS.map((action): ProblemTreeNode => ({
+        kind: 'action',
+        platform: node.platform,
+        summary: node.summary,
+        action,
+      }));
+    }
+
     return [];
   }
 
@@ -214,6 +246,14 @@ export class ProblemTreeDataProvider implements vscode.TreeDataProvider<ProblemT
         return 'LeetCode CN';
       case 'hdoj':
         return 'HDOJ';
+      case 'codeforces':
+        return 'Codeforces';
+      case 'luogu':
+        return '洛谷';
+      case 'poj':
+        return 'POJ';
+      case 'lanqiao':
+        return '蓝桥云课';
       default:
         return platform;
     }

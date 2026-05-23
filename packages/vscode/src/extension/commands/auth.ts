@@ -55,6 +55,10 @@ async function pickPlatform(): Promise<PlatformId | undefined> {
     [
       { label: 'LeetCode CN', value: 'leetcode-cn' as PlatformId },
       { label: 'HDOJ', value: 'hdoj' as PlatformId },
+      { label: 'Codeforces', value: 'codeforces' as PlatformId },
+      { label: '洛谷', value: 'luogu' as PlatformId },
+      { label: 'POJ', value: 'poj' as PlatformId },
+      { label: '蓝桥云课', value: 'lanqiao' as PlatformId },
     ],
     { placeHolder: '选择要登录的平台' },
   );
@@ -214,8 +218,36 @@ async function loginManualByPlatform(platform: PlatformId, services: OJServices)
   if (platform === 'hdoj') {
     return loginHdojManual(services.httpClient, services.credentialStore, services.credentialChecker);
   }
-  void vscode.window.showWarningMessage(`平台 ${platform} 尚未支持登录(M2)`);
-  return false;
+  return loginGenericManual(platform, services.credentialStore);
+}
+
+/**
+ * 通用粘贴流程：用户在浏览器登录后粘贴 cookie（或 Lanqiao 的 JWT）。
+ * 适配 codeforces / luogu / poj / lanqiao。
+ */
+async function loginGenericManual(
+  platform: PlatformId,
+  store: CredentialStore,
+): Promise<boolean> {
+  const promptMsg =
+    platform === 'lanqiao'
+      ? '蓝桥云课 JWT (从浏览器 localStorage / Authorization header 取得)'
+      : `${platform} cookie (整段，含 SESSION/JSESSIONID/PHPSESSID 等)`;
+  const raw = await vscode.window.showInputBox({
+    prompt: promptMsg,
+    password: true,
+    ignoreFocusOut: true,
+  });
+  if (!raw) return false;
+  const cred =
+    platform === 'lanqiao'
+      ? { platform, token: raw }
+      : { platform, cookie: raw };
+  await store.set(platform, cred);
+  void vscode.window.showInformationMessage(
+    `${platform} 凭证已写入（首次调用 listProblems / submit 时若无效将提示重登）`,
+  );
+  return true;
 }
 
 async function loginAuto(platform: PlatformId, services: OJServices): Promise<boolean> {
@@ -240,6 +272,12 @@ function extractPlatformArg(arg: unknown): PlatformId | undefined {
 
 export function registerAuthCommands(services: OJServices): vscode.Disposable[] {
   return [
+    // 内部命令：SharedConfigStore 文件变更时触发，从共享文件同步 session 并刷新 UI
+    vscode.commands.registerCommand('ojAgent.internal.refreshCredentials', async () => {
+      try {
+        await (services.credentialStore as import('@oj-agent/core').SecretCredentialStore).loadFromSharedStore();
+      } catch { /* ignore */ }
+    }),
     vscode.commands.registerCommand('ojAgent.auth.login', async (arg?: unknown) => {
       let platform = extractPlatformArg(arg);
       if (!platform) platform = await pickPlatform();

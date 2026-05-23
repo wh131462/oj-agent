@@ -96,12 +96,20 @@ export class SettingsPanel {
           await this.refresh();
           break;
         }
-        case 'delete':
+        case 'delete': {
+          const target = this.services.profiles.list().find((p) => p.id === m.id);
+          const confirm = await vscode.window.showWarningMessage(
+            `确认删除 Profile "${target?.label ?? m.id}"？同时会清除其 API Key。`,
+            { modal: true },
+            '删除',
+          );
+          if (confirm !== '删除') return;
           await this.services.profiles.remove(m.id);
           await this.services.vault.delete(m.id);
           this.toast('info', '已删除');
           await this.refresh();
           break;
+        }
         case 'setActive':
           await this.services.profiles.setActive(m.id);
           this.toast('info', '已切换活动 Profile');
@@ -143,65 +151,381 @@ export class SettingsPanel {
 
   private html(): string {
     const nonce = Math.random().toString(36).slice(2);
-    return /* html */ `<!doctype html><html><head>
+    return /* html */ `<!doctype html><html lang="zh-CN"><head>
 <meta charset="utf-8" />
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
 <style>
-  body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); padding: 12px; }
-  h2 { margin-top: 16px; }
-  table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: 6px; border-bottom: 1px solid var(--vscode-panel-border); }
-  button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: 0; padding: 3px 8px; cursor: pointer; margin-right: 4px; font-size: 12px; }
-  button.secondary { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
-  button.danger { background: var(--vscode-inputValidation-errorBackground); }
-  input, select { background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); padding: 4px 6px; width: 100%; box-sizing: border-box; }
-  label { display: block; font-size: 11px; opacity: 0.8; margin-top: 6px; }
-  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .badge { font-size: 10px; padding: 1px 4px; border-radius: 3px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); margin-left: 4px; }
-  #toast { position: fixed; right: 12px; bottom: 12px; padding: 6px 10px; border-radius: 4px; background: var(--vscode-notifications-background); color: var(--vscode-notifications-foreground); display: none; }
-  .presets button { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
-</style></head><body>
-<h2>已配置 Profile</h2>
-<table><thead><tr><th>名称</th><th>Provider</th><th>Model</th><th>BaseURL</th><th>状态</th><th>操作</th></tr></thead>
-<tbody id="rows"></tbody></table>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --fg: var(--vscode-foreground);
+    --fg-muted: var(--vscode-descriptionForeground);
+    --bg: var(--vscode-editor-background);
+    --bg-input: var(--vscode-input-background);
+    --bg-hover: var(--vscode-list-hoverBackground, rgba(128,128,128,0.08));
+    --border: var(--vscode-widget-border, rgba(128,128,128,0.18));
+    --focus: var(--vscode-focusBorder);
+    --error: var(--vscode-errorForeground);
+    --easy:   #4ade80;
+  }
+  body {
+    font-family: var(--vscode-font-family);
+    color: var(--fg);
+    background: var(--bg);
+    padding: 28px 32px 48px;
+    max-width: 820px;
+    margin: 0 auto;
+    font-size: 13px;
+    line-height: 1.6;
+  }
 
-<h2 id="formTitle">新建 Profile</h2>
-<input type="hidden" id="id" />
-<div class="row">
-  <div><label>名称 (label)</label><input id="label" placeholder="如 OpenAI GPT-4o" /></div>
-  <div><label>Provider</label>
-    <select id="provider"><option value="openai">openai</option><option value="anthropic">anthropic</option></select>
+  /* ── Page Header ── */
+  .page-header { margin-bottom: 24px; }
+  .page-header h1 {
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: -0.3px;
+    margin-bottom: 6px;
+  }
+  .page-header p { font-size: 12px; color: var(--fg-muted); }
+
+  /* ── Section ── */
+  .section-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--fg-muted);
+    margin-bottom: 8px;
+  }
+
+  /* ── Profile Rows ── */
+  #profileList { margin-bottom: 28px; }
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 4px;
+    border: 1px solid transparent;
+    cursor: default;
+  }
+  .row:hover { background: var(--bg-hover); }
+  .row + .row { margin-top: 2px; }
+  .row .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    border: 1.5px solid var(--fg-muted);
+    flex-shrink: 0;
+  }
+  .row.active .dot {
+    background: var(--easy);
+    border-color: var(--easy);
+  }
+  .row .info { flex: 1; min-width: 0; }
+  .row .name {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--fg);
+  }
+  .row .meta {
+    font-size: 11px;
+    color: var(--fg-muted);
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .row .meta.warn { color: var(--error); }
+  .row .actions { display: flex; gap: 2px; flex-shrink: 0; }
+  .empty {
+    padding: 18px 12px;
+    color: var(--fg-muted);
+    font-size: 12px;
+    font-style: italic;
+  }
+
+  /* ── Buttons ── */
+  button {
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--fg);
+    padding: 4px 10px;
+    border-radius: 3px;
+    transition: background 0.12s;
+  }
+  button:hover:not(:disabled) { background: var(--bg-hover); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.primary {
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    padding: 6px 16px;
+    font-weight: 500;
+  }
+  button.primary:hover:not(:disabled) { background: var(--vscode-button-hoverBackground); }
+  button.danger { color: var(--error); }
+  button.danger:hover:not(:disabled) { background: rgba(248,113,113,0.08); }
+
+  /* ── Form ── */
+  .form-section { margin-top: 8px; }
+  .form-section h2 {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 18px;
+  }
+  .presets .label {
+    font-size: 12px;
+    color: var(--fg-muted);
+    margin-right: 4px;
+    align-self: center;
+  }
+  .preset-btn {
+    font-size: 11px;
+    padding: 3px 9px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: var(--fg-muted);
+    background: transparent;
+  }
+  .preset-btn:hover { color: var(--fg); border-color: var(--focus); background: var(--bg-hover); }
+
+  .form-grid { display: grid; gap: 14px 16px; grid-template-columns: 1fr 1fr; }
+  .form-grid .full { grid-column: 1 / -1; }
+  .form-group label {
+    display: block;
+    font-size: 12px;
+    color: var(--fg);
+    margin-bottom: 4px;
+  }
+  .form-group .hint {
+    font-size: 11px;
+    color: var(--fg-muted);
+    margin-top: 4px;
+  }
+  .form-group input,
+  .form-group select {
+    width: 100%;
+    background: var(--bg-input);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 5px 8px;
+    font-size: 12px;
+    font-family: inherit;
+    outline: none;
+  }
+  .form-group input:focus,
+  .form-group select:focus {
+    border-color: var(--focus);
+  }
+  .form-group select {
+    appearance: none;
+    -webkit-appearance: none;
+    padding-right: 28px;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23888' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M4 6l4 4 4-4'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    background-size: 12px 12px;
+    cursor: pointer;
+  }
+
+  /* ── Custom dropdown (replaces native select for nicer popup) ── */
+  .dropdown { position: relative; }
+  .dropdown-trigger {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    background: var(--bg-input);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 5px 8px;
+    font-size: 12px;
+    font-family: inherit;
+    cursor: pointer;
+    outline: none;
+    text-align: left;
+  }
+  .dropdown-trigger:hover { border-color: var(--focus); }
+  .dropdown.open .dropdown-trigger { border-color: var(--focus); }
+  .dropdown-trigger .chevron {
+    width: 12px; height: 12px;
+    flex-shrink: 0;
+    opacity: 0.7;
+    transition: transform 0.15s;
+  }
+  .dropdown.open .dropdown-trigger .chevron { transform: rotate(180deg); }
+  .dropdown-menu {
+    display: none;
+    position: absolute;
+    left: 0; right: 0;
+    top: calc(100% + 4px);
+    background: var(--vscode-menu-background, var(--bg));
+    color: var(--vscode-menu-foreground, var(--fg));
+    border: 1px solid var(--vscode-menu-border, var(--border));
+    border-radius: 4px;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.32);
+    padding: 4px;
+    z-index: 20;
+    max-height: 240px;
+    overflow-y: auto;
+  }
+  .dropdown.open .dropdown-menu { display: block; }
+  .dropdown-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 5px 10px;
+    border: none;
+    background: transparent;
+    color: inherit;
+    font-family: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    border-radius: 3px;
+  }
+  .dropdown-item:hover {
+    background: var(--vscode-menu-selectionBackground, var(--bg-hover));
+    color: var(--vscode-menu-selectionForeground, inherit);
+  }
+  .dropdown-item.selected {
+    background: var(--bg-hover);
+  }
+
+  /* ── Advanced collapsible ── */
+  details.advanced { margin-top: 14px; }
+  details.advanced > summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--fg-muted);
+    padding: 6px 0;
+    user-select: none;
+    list-style: none;
+  }
+  details.advanced > summary::-webkit-details-marker { display: none; }
+  details.advanced > summary .chevron {
+    width: 12px; height: 12px;
+    transition: transform 0.15s;
+    flex-shrink: 0;
+  }
+  details.advanced[open] > summary .chevron { transform: rotate(90deg); }
+  details.advanced > summary:hover { color: var(--fg); }
+  details.advanced .form-grid { margin-top: 10px; grid-template-columns: 1fr 1fr 1fr; }
+
+  .form-actions { display: flex; gap: 8px; margin-top: 20px; align-items: center; }
+
+  /* ── Toast ── */
+  #toast {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    padding: 8px 14px;
+    border-radius: 3px;
+    font-size: 12px;
+    display: none;
+    z-index: 100;
+    border: 1px solid var(--border);
+    background: var(--vscode-notifications-background, var(--bg));
+    color: var(--fg);
+    max-width: 320px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  }
+  #toast.warn  { border-color: rgba(251,191,36,0.4); }
+  #toast.error { border-color: rgba(248,113,113,0.4); color: var(--error); }
+</style></head><body>
+
+<div class="page-header">
+  <h1>AI 模型配置</h1>
+  <p>管理用于解题辅助的模型 Profile。API Key 仅存于 VS Code SecretStorage，不写入 settings.json。</p>
+</div>
+
+<p class="section-label">已配置 Profile</p>
+<div id="profileList"><div class="empty">暂无 Profile，请在下方新建</div></div>
+
+<div class="form-section">
+  <h2 id="formTitle">新建 Profile</h2>
+  <input type="hidden" id="id" />
+
+  <div class="presets">
+    <span class="label">从模板：</span>
+    <span id="presets"></span>
   </div>
-</div>
-<div class="row">
-  <div><label>Model</label><input id="model" placeholder="如 gpt-4o / claude-sonnet-4-6" /></div>
-  <div><label>Base URL（可选，缺省走官方端点）</label><input id="baseUrl" placeholder="https://api.example.com" /></div>
-</div>
-<div class="row">
-  <div><label>API Key（保存在 SecretStorage，不写入 settings.json）</label><input id="apiKey" type="password" placeholder="留空则不更新现有 Key" /></div>
-  <div><label>常用预设</label>
-    <div class="presets">
-      <button data-preset="openai-gpt-4o">OpenAI gpt-4o</button>
-      <button data-preset="openai-mini">OpenAI gpt-4o-mini</button>
-      <button data-preset="anthropic-opus">Claude Opus 4.7</button>
-      <button data-preset="anthropic-sonnet">Claude Sonnet 4.6</button>
-      <button data-preset="anthropic-haiku">Claude Haiku 4.5</button>
-      <button data-preset="deepseek">DeepSeek</button>
-      <button data-preset="openrouter">OpenRouter</button>
+
+  <div class="form-grid">
+    <div class="form-group">
+      <label for="label">名称</label>
+      <input id="label" placeholder="e.g. GPT-4o · Daily" />
+    </div>
+    <div class="form-group">
+      <label for="providerTrigger">提供商</label>
+      <div class="dropdown" id="providerDropdown">
+        <button type="button" class="dropdown-trigger" id="providerTrigger" aria-haspopup="listbox" aria-expanded="false">
+          <span id="providerLabel">openai (ChatCompletion)</span>
+          <svg class="chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"/></svg>
+        </button>
+        <div class="dropdown-menu" role="listbox">
+          <button type="button" class="dropdown-item" data-value="openai">openai (ChatCompletion)</button>
+          <button type="button" class="dropdown-item" data-value="anthropic">anthropic (Messages)</button>
+        </div>
+        <input type="hidden" id="provider" value="openai" />
+      </div>
+    </div>
+    <div class="form-group">
+      <label for="model">模型 ID</label>
+      <input id="model" placeholder="gpt-4o / claude-sonnet-4-6" />
+    </div>
+    <div class="form-group">
+      <label for="baseUrl">Base URL</label>
+      <input id="baseUrl" placeholder="留空使用官方端点" />
+    </div>
+    <div class="form-group full">
+      <label for="apiKey">API Key</label>
+      <input id="apiKey" type="password" placeholder="留空则不更新现有 Key" autocomplete="off" />
+      <div class="hint">保存到 VS Code SecretStorage，不写入任何文件</div>
     </div>
   </div>
-</div>
-<div class="row">
-  <div><label>temperature</label><input id="temperature" type="number" step="0.1" value="0.2" /></div>
-  <div><label>maxOutputTokens</label><input id="maxOutputTokens" type="number" value="2048" /></div>
-</div>
-<div class="row">
-  <div><label>maxInputTokens</label><input id="maxInputTokens" type="number" value="32000" /></div>
-  <div><label>requestTimeoutMs</label><input id="requestTimeoutMs" type="number" value="60000" /></div>
-</div>
-<div style="margin-top: 10px;">
-  <button id="save">保存</button>
-  <button id="reset" class="secondary">重置表单</button>
+
+  <details class="advanced">
+    <summary>
+      <svg class="chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4l4 4-4 4"/></svg>
+      高级参数
+    </summary>
+    <div class="form-grid">
+      <div class="form-group">
+        <label for="temperature">temperature</label>
+        <input id="temperature" type="number" step="0.1" min="0" max="2" value="0.2" />
+      </div>
+      <div class="form-group">
+        <label for="maxOutputTokens">maxOutputTokens</label>
+        <input id="maxOutputTokens" type="number" min="1" value="2048" />
+      </div>
+      <div class="form-group">
+        <label for="requestTimeoutMs">timeoutMs</label>
+        <input id="requestTimeoutMs" type="number" min="1000" value="60000" />
+      </div>
+    </div>
+  </details>
+
+  <div class="form-actions">
+    <button class="primary" id="save">保存</button>
+    <button id="reset">重置</button>
+  </div>
 </div>
 
 <div id="toast"></div>
@@ -209,44 +533,95 @@ export class SettingsPanel {
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
   const $ = (id) => document.getElementById(id);
-  const PRESETS = {
-    'openai-gpt-4o':    { label:'OpenAI gpt-4o',    provider:'openai',    model:'gpt-4o' },
-    'openai-mini':      { label:'OpenAI gpt-4o-mini',provider:'openai',   model:'gpt-4o-mini' },
-    'anthropic-opus':   { label:'Claude Opus 4.7',  provider:'anthropic', model:'claude-opus-4-7' },
-    'anthropic-sonnet': { label:'Claude Sonnet 4.6',provider:'anthropic', model:'claude-sonnet-4-6' },
-    'anthropic-haiku':  { label:'Claude Haiku 4.5', provider:'anthropic', model:'claude-haiku-4-5-20251001' },
-    'deepseek':         { label:'DeepSeek Chat',    provider:'openai',    model:'deepseek-chat', baseUrl:'https://api.deepseek.com' },
-    'openrouter':       { label:'OpenRouter',       provider:'openai',    model:'openai/gpt-4o', baseUrl:'https://openrouter.ai/api' },
-  };
-  document.querySelectorAll('button[data-preset]').forEach((b) => {
-    b.addEventListener('click', (e) => {
+
+  const PRESETS = [
+    { label: 'OpenAI gpt-4o',     provider: 'openai',    model: 'gpt-4o' },
+    { label: 'gpt-4o-mini',       provider: 'openai',    model: 'gpt-4o-mini' },
+    { label: 'Claude Opus 4.7',   provider: 'anthropic', model: 'claude-opus-4-7' },
+    { label: 'Claude Sonnet 4.6', provider: 'anthropic', model: 'claude-sonnet-4-6' },
+    { label: 'Claude Haiku 4.5',  provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
+    { label: 'DeepSeek Chat',     provider: 'openai',    model: 'deepseek-chat',  baseUrl: 'https://api.deepseek.com' },
+    { label: 'OpenRouter',        provider: 'openai',    model: 'openai/gpt-4o', baseUrl: 'https://openrouter.ai/api' },
+  ];
+
+  const presetsEl = $('presets');
+  PRESETS.forEach((p) => {
+    const btn = document.createElement('button');
+    btn.className = 'preset-btn';
+    btn.type = 'button';
+    btn.textContent = p.label;
+    btn.addEventListener('click', (e) => {
       e.preventDefault();
-      const p = PRESETS[b.dataset.preset];
-      if (!p) return;
-      $('label').value = p.label; $('provider').value = p.provider;
-      $('model').value = p.model; $('baseUrl').value = p.baseUrl || '';
+      $('label').value = p.label;
+      setProvider(p.provider);
+      $('model').value = p.model;
+      $('baseUrl').value = p.baseUrl || '';
+    });
+    presetsEl.appendChild(btn);
+  });
+
+  // ── Provider dropdown ──
+  const PROVIDER_LABELS = {
+    openai: 'openai (ChatCompletion)',
+    anthropic: 'anthropic (Messages)',
+  };
+  const providerDropdown = $('providerDropdown');
+  const providerTrigger = $('providerTrigger');
+  const providerLabelEl = $('providerLabel');
+  function setProvider(value) {
+    $('provider').value = value;
+    providerLabelEl.textContent = PROVIDER_LABELS[value] || value;
+    providerDropdown.querySelectorAll('.dropdown-item').forEach((b) => {
+      b.classList.toggle('selected', b.dataset.value === value);
+    });
+  }
+  providerTrigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const open = providerDropdown.classList.toggle('open');
+    providerTrigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+  providerDropdown.querySelectorAll('.dropdown-item').forEach((b) => {
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setProvider(b.dataset.value);
+      providerDropdown.classList.remove('open');
+      providerTrigger.setAttribute('aria-expanded', 'false');
     });
   });
+  document.addEventListener('click', () => {
+    providerDropdown.classList.remove('open');
+    providerTrigger.setAttribute('aria-expanded', 'false');
+  });
+  setProvider('openai');
 
   function readDraft() {
     return {
       id: $('id').value || undefined,
-      label: $('label').value, provider: $('provider').value,
+      label: $('label').value,
+      provider: $('provider').value,
       model: $('model').value,
       baseUrl: $('baseUrl').value.trim() || undefined,
       temperature: Number($('temperature').value),
       maxOutputTokens: Number($('maxOutputTokens').value),
-      maxInputTokens: Number($('maxInputTokens').value),
+      maxInputTokens: 32000,
       requestTimeoutMs: Number($('requestTimeoutMs').value),
     };
   }
+
   function resetForm() {
-    $('id').value=''; $('label').value=''; $('provider').value='openai';
-    $('model').value=''; $('baseUrl').value=''; $('apiKey').value='';
-    $('temperature').value='0.2'; $('maxOutputTokens').value='2048';
-    $('maxInputTokens').value='32000'; $('requestTimeoutMs').value='60000';
-    $('formTitle').textContent='新建 Profile';
+    $('id').value = '';
+    $('label').value = '';
+    $('provider').value = 'openai';
+    setProvider('openai');
+    $('model').value = '';
+    $('baseUrl').value = '';
+    $('apiKey').value = '';
+    $('temperature').value = '0.2';
+    $('maxOutputTokens').value = '2048';
+    $('requestTimeoutMs').value = '60000';
+    $('formTitle').textContent = '新建 Profile';
   }
+
   $('save').onclick = () => {
     const draft = readDraft();
     const apiKey = $('apiKey').value || undefined;
@@ -255,50 +630,90 @@ export class SettingsPanel {
   };
   $('reset').onclick = resetForm;
 
-  function rowHTML(r) {
-    return '<tr>' +
-      '<td>' + escape(r.label) + (r.active ? '<span class="badge">活动</span>' : '') + '</td>' +
-      '<td>' + escape(r.provider) + '</td>' +
-      '<td>' + escape(r.model) + '</td>' +
-      '<td>' + escape(r.baseUrl || '(官方)') + '</td>' +
-      '<td>' + (r.hasKey ? 'Key: sk-****' : '<i>未配置 Key</i>') + '</td>' +
-      '<td>' +
-        '<button data-act="edit" data-id="' + r.id + '">编辑</button>' +
-        '<button data-act="setActive" data-id="' + r.id + '">设为活动</button>' +
-        '<button data-act="test" data-id="' + r.id + '" class="secondary">测试连接</button>' +
-        '<button data-act="clearKey" data-id="' + r.id + '" class="secondary">清除 Key</button>' +
-        '<button data-act="delete" data-id="' + r.id + '" class="danger">删除</button>' +
-      '</td></tr>';
+  function esc(s) {
+    return String(s || '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
   }
-  function escape(s) { return String(s || '').replace(/[<>&"]/g, (c) => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c])); }
 
-  let lastRows = [];
+  function renderRow(r) {
+    const div = document.createElement('div');
+    div.className = 'row' + (r.active ? ' active' : '');
+    const metaParts = [esc(r.provider), esc(r.model)];
+    if (r.baseUrl) metaParts.push(esc(r.baseUrl));
+    const metaCls = r.hasKey ? 'meta' : 'meta warn';
+    const metaSuffix = r.hasKey ? '' : ' · 未配置 Key';
+    div.innerHTML =
+      '<span class="dot" title="' + (r.active ? '当前激活' : '点击激活') + '"></span>' +
+      '<div class="info">' +
+        '<div class="name">' + esc(r.label) + '</div>' +
+        '<div class="' + metaCls + '">' + metaParts.join(' · ') + metaSuffix + '</div>' +
+      '</div>' +
+      '<div class="actions">' +
+        (!r.active ? '<button data-act="setActive" data-id="' + esc(r.id) + '" title="设为当前激活">激活</button>' : '') +
+        '<button data-act="test" data-id="' + esc(r.id) + '" title="测试连接">测试</button>' +
+        '<button data-act="edit" data-id="' + esc(r.id) + '" title="编辑">编辑</button>' +
+        (r.hasKey ? '<button data-act="clearKey" data-id="' + esc(r.id) + '" title="清除已保存的 Key">清除 Key</button>' : '') +
+        '<button class="danger" data-act="delete" data-id="' + esc(r.id) + '" title="删除">删除</button>' +
+      '</div>';
+    return div;
+  }
+
   window.addEventListener('message', (ev) => {
     const m = ev.data;
     if (m.kind === 'list') {
-      lastRows = m.rows;
-      $('rows').innerHTML = m.rows.map(rowHTML).join('') || '<tr><td colspan=6><i>暂无 Profile</i></td></tr>';
-      document.querySelectorAll('#rows button').forEach((b) => {
-        b.addEventListener('click', () => {
-          const id = b.dataset.id; const act = b.dataset.act;
-          if (act === 'edit') {
-            const r = m.rows.find((x) => x.id === id); if (!r) return;
-            $('id').value = r.id; $('label').value = r.label;
-            $('provider').value = r.provider; $('model').value = r.model;
-            $('baseUrl').value = r.baseUrl || '';
-            $('formTitle').textContent = '编辑 Profile: ' + r.label;
-          } else if (act === 'delete') {
-            if (confirm('删除该 Profile？')) vscode.postMessage({ kind: 'delete', id });
-          } else {
-            vscode.postMessage({ kind: act, id });
+      const listEl = $('profileList');
+      listEl.innerHTML = '';
+      if (m.rows.length === 0) {
+        listEl.innerHTML = '<div class="empty">暂无 Profile，请在下方新建</div>';
+      } else {
+        m.rows.forEach((r) => {
+          const row = renderRow(r);
+          row.querySelectorAll('button[data-act]').forEach((b) => {
+            b.addEventListener('click', (e) => {
+              e.stopPropagation();
+              const id = b.dataset.id;
+              const act = b.dataset.act;
+              if (act === 'edit') {
+                const found = m.rows.find((x) => x.id === id);
+                if (!found) return;
+                $('id').value = found.id;
+                $('label').value = found.label;
+                $('provider').value = found.provider;
+                setProvider(found.provider);
+                $('model').value = found.model;
+                $('baseUrl').value = found.baseUrl || '';
+                $('formTitle').textContent = '编辑：' + found.label;
+                document.querySelector('.form-section').scrollIntoView({ behavior: 'smooth' });
+              } else if (act === 'delete') {
+                vscode.postMessage({ kind: 'delete', id });
+              } else {
+                vscode.postMessage({ kind: act, id });
+              }
+            });
+          });
+          // Click row dot/info area to activate
+          if (!r.active) {
+            row.querySelector('.dot').style.cursor = 'pointer';
+            row.querySelector('.dot').addEventListener('click', () => {
+              vscode.postMessage({ kind: 'setActive', id: r.id });
+            });
           }
+          listEl.appendChild(row);
         });
-      });
+      }
     } else if (m.kind === 'toast') {
-      const t = $('toast'); t.textContent = m.text; t.style.display = 'block';
-      setTimeout(() => { t.style.display = 'none'; }, 2500);
+      showToast(m.level, m.text);
     }
   });
+
+  function showToast(level, text) {
+    const t = $('toast');
+    t.textContent = text;
+    t.className = level;
+    t.style.display = 'block';
+    clearTimeout(t._timer);
+    t._timer = setTimeout(() => { t.style.display = 'none'; }, 2800);
+  }
+
   vscode.postMessage({ kind: 'refresh' });
 </script></body></html>`;
   }

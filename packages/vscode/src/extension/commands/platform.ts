@@ -23,7 +23,7 @@ async function pullAndOpen(deps: PlatformCommandDeps, ref: ProblemRef): Promise<
   await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: `拉取 ${ref.platform} ${ref.id}...` },
     async () => {
-      const detail = await adapter.getProblem(ref.id);
+      const detail = await adapter.getProblem(ref.slug ?? ref.id);
       await services.workspaceManager.writeProblem(detail, { rootDir: root, defaultLang });
     },
   );
@@ -72,9 +72,10 @@ export function registerPlatformCommands(deps: PlatformCommandDeps): vscode.Disp
       await problemWebview.open(arg);
     }),
 
-    vscode.commands.registerCommand('ojAgent.platform.openInBrowser', async (arg?: ProblemRef) => {
-      if (!arg) return;
-      const url = await buildUrl(arg);
+    vscode.commands.registerCommand('ojAgent.platform.openInBrowser', async (arg?: unknown) => {
+      const ref = toProblemRef(arg);
+      if (!ref) return;
+      const url = await buildUrl(ref);
       if (url) void vscode.env.openExternal(vscode.Uri.parse(url));
     }),
 
@@ -88,7 +89,7 @@ export function registerPlatformCommands(deps: PlatformCommandDeps): vscode.Disp
         return;
       }
       try {
-        const detail = await services.registry.get(arg.platform).getProblem(arg.id);
+        const detail = await services.registry.get(arg.platform).getProblem(arg.slug ?? arg.id);
         await services.workspaceManager.refresh(detail, dir);
         await problemWebview.refresh(arg);
         void vscode.window.showInformationMessage('题面已刷新');
@@ -123,10 +124,32 @@ export function registerPlatformCommands(deps: PlatformCommandDeps): vscode.Disp
       void vscode.window.showInformationMessage(`已添加用例 #${n}`);
     }),
 
-    vscode.commands.registerCommand('ojAgent.platform.copyProblemId', async (arg?: ProblemRef) => {
-      if (!arg?.id) return;
-      await vscode.env.clipboard.writeText(arg.id);
-      void vscode.window.showInformationMessage(`已复制: ${arg.id}`);
+    vscode.commands.registerCommand('ojAgent.platform.openCode', async (arg?: ProblemRef) => {
+      if (!arg || !arg.platform || !arg.id) {
+        void vscode.window.showWarningMessage('缺少题目信息');
+        return;
+      }
+      const root = resolveWorkspaceRoot(services.configBackend);
+      const dir = await findProblemDir(root, arg);
+      if (!dir) {
+        void vscode.window.showWarningMessage('题目尚未拉取到本地');
+        return;
+      }
+      const files = await fs.readdir(dir).catch(() => [] as string[]);
+      const target = files.find((f) => f === 'Main.java' || /^solution\.[a-z]+$/i.test(f));
+      if (!target) {
+        void vscode.window.showWarningMessage('未找到 solution.* 或 Main.java');
+        return;
+      }
+      const doc = await vscode.workspace.openTextDocument(path.join(dir, target));
+      await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
+    }),
+
+    vscode.commands.registerCommand('ojAgent.platform.copyProblemId', async (arg?: unknown) => {
+      const ref = toProblemRef(arg);
+      if (!ref?.id) return;
+      await vscode.env.clipboard.writeText(ref.id);
+      void vscode.window.showInformationMessage(`已复制: ${ref.id}`);
     }),
 
     vscode.commands.registerCommand('ojAgent.workspace.setRoot', async () => {
@@ -148,14 +171,44 @@ export function registerPlatformCommands(deps: PlatformCommandDeps): vscode.Disp
 }
 
 async function buildUrl(ref: ProblemRef): Promise<string | undefined> {
-  if (ref.platform === 'leetcode-cn') {
-    return `https://leetcode.cn/problems/${ref.slug ?? ref.id}/`;
+  switch (ref.platform) {
+    case 'leetcode-cn':
+      return `https://leetcode.cn/problems/${ref.slug ?? ref.id}/`;
+    case 'hdoj':
+      return `http://acm.hdu.edu.cn/showproblem.php?pid=${ref.id}`;
+    case 'codeforces': {
+      // ref.id 形如 "1900A"
+      const m = ref.id.match(/^(\d+)([A-Z]\d?)$/i);
+      if (!m) return undefined;
+      return `https://codeforces.com/contest/${m[1]}/problem/${m[2]!.toUpperCase()}`;
+    }
+    case 'luogu':
+      return `https://www.luogu.com.cn/problem/${ref.id}`;
+    case 'poj':
+      return `http://poj.org/problem?id=${ref.id}`;
+    case 'lanqiao':
+      return `https://www.lanqiao.cn/problems/${ref.id}/learning/`;
+    default:
+      return undefined;
   }
-  if (ref.platform === 'hdoj') {
-    return `http://acm.hdu.edu.cn/showproblem.php?pid=${ref.id}`;
+}
+
+function toProblemRef(arg: unknown): ProblemRef | undefined {
+  if (!arg || typeof arg !== 'object') return undefined;
+  const a = arg as Record<string, unknown>;
+  if (a.kind === 'problem' && a.platform && a.summary && typeof a.summary === 'object') {
+    const sum = a.summary as { id?: string; url?: string };
+    if (!sum.id) return undefined;
+    return { platform: a.platform as PlatformId, id: sum.id, slug: extractSlugFromUrl(sum.url) };
+  }
+  if (typeof a.platform === 'string' && typeof a.id === 'string') {
+    return { platform: a.platform as PlatformId, id: a.id, slug: typeof a.slug === 'string' ? a.slug : undefined };
   }
   return undefined;
 }
 
-// 占位:让 unused import 不报错
-void ((p: PlatformId) => p);
+function extractSlugFromUrl(url?: string): string | undefined {
+  if (!url) return undefined;
+  const m = url.match(/\/problems\/([^/?#]+)/);
+  return m?.[1];
+}
