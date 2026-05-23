@@ -10,96 +10,321 @@
     "vscode": "^1.94.0",
     "node": ">=20"
   },
-  "categories": ["Other", "Education"],
+  "categories": [
+    "Other",
+    "Education"
+  ],
   "main": "./dist/extension.js",
   "activationEvents": [
     "onStartupFinished"
   ],
   "contributes": {
     "commands": [
-      { "command": "ojAgent.ai.explainError", "title": "OJ-Agent: AI · 解释错因", "category": "OJ-Agent" },
-      { "command": "ojAgent.ai.generateApproach", "title": "OJ-Agent: AI · 生成解题思路", "category": "OJ-Agent" },
-      { "command": "ojAgent.ai.generateSolution", "title": "OJ-Agent: AI · 生成完整题解", "category": "OJ-Agent" },
-      { "command": "ojAgent.ai.explainCode", "title": "OJ-Agent: AI · 解释当前代码", "category": "OJ-Agent" },
-      { "command": "ojAgent.ai.switchProfile", "title": "OJ-Agent: 切换 AI 模型 Profile", "category": "OJ-Agent" },
-      { "command": "ojAgent.ai.testConnection", "title": "OJ-Agent: AI · 测试连接", "category": "OJ-Agent" },
-      { "command": "ojAgent.ai.openSettings", "title": "OJ-Agent: 打开 AI 模型设置", "category": "OJ-Agent", "icon": "$(gear)" },
-      { "command": "ojAgent.ai.openPanel", "title": "OJ-Agent: 打开 AI 助手面板", "category": "OJ-Agent", "icon": "$(comment-discussion)" },
-      { "command": "ojAgent.ai.addProfile", "title": "OJ-Agent: 新建 AI Profile", "category": "OJ-Agent", "icon": "$(add)" },
-      { "command": "ojAgent.ai.refreshProfiles", "title": "OJ-Agent: 刷新 Profile 列表", "category": "OJ-Agent", "icon": "$(refresh)" },
-      { "command": "ojAgent.ai.setActiveProfile", "title": "OJ-Agent: 设为活动 Profile", "category": "OJ-Agent", "icon": "$(check)" },
-      { "command": "ojAgent.ai.deleteProfile", "title": "OJ-Agent: 删除 Profile", "category": "OJ-Agent", "icon": "$(trash)" },
-      { "command": "ojAgent.ai.editProfile", "title": "OJ-Agent: 编辑 Profile", "category": "OJ-Agent", "icon": "$(edit)" },
-
-      { "command": "ojAgent.platform.pullByUrl", "title": "OJ-Agent: 粘贴 URL 拉取题目", "category": "OJ-Agent", "icon": "$(cloud-download)" },
-      { "command": "ojAgent.platform.pullProblem", "title": "OJ-Agent: 拉取到本地", "category": "OJ-Agent", "icon": "$(cloud-download)" },
-      { "command": "ojAgent.platform.openInBrowser", "title": "OJ-Agent: 浏览器中打开", "category": "OJ-Agent", "icon": "$(link-external)" },
-      { "command": "ojAgent.platform.refreshProblem", "title": "OJ-Agent: 刷新题面", "category": "OJ-Agent", "icon": "$(refresh)" },
-      { "command": "ojAgent.platform.addCustomCase", "title": "OJ-Agent: 添加自定义用例", "category": "OJ-Agent", "icon": "$(add)" },
-      { "command": "ojAgent.platform.copyProblemId", "title": "OJ-Agent: 复制题目 ID", "category": "OJ-Agent" },
-      { "command": "ojAgent.platform.openProblemView", "title": "OJ-Agent: 打开题面 Webview", "category": "OJ-Agent" },
-
-      { "command": "ojAgent.judge.runAll", "title": "OJ-Agent: 本地测试 · 全部用例", "category": "OJ-Agent", "icon": "$(play)" },
-      { "command": "ojAgent.judge.runCase", "title": "OJ-Agent: 本地测试 · 单用例", "category": "OJ-Agent" },
-      { "command": "ojAgent.judge.openToolchain", "title": "OJ-Agent: 查看工具链状态", "category": "OJ-Agent" },
-
-      { "command": "ojAgent.submission.submit", "title": "OJ-Agent: 提交当前题解", "category": "OJ-Agent", "icon": "$(cloud-upload)" },
-      { "command": "ojAgent.submission.openLatest", "title": "OJ-Agent: 打开最近一次提交结果", "category": "OJ-Agent" },
-
-      { "command": "ojAgent.auth.login", "title": "OJ-Agent: 登录 OJ 平台(浏览器自动)", "category": "OJ-Agent" },
-      { "command": "ojAgent.auth.loginManual", "title": "OJ-Agent: 登录 OJ 平台(手动粘贴 Cookie)", "category": "OJ-Agent" },
-      { "command": "ojAgent.auth.logout", "title": "OJ-Agent: 登出 OJ 平台", "category": "OJ-Agent" },
-      { "command": "ojAgent.auth.relogin", "title": "OJ-Agent: 重新登录 OJ 平台", "category": "OJ-Agent" },
-      { "command": "ojAgent.auth.openCookieGuide", "title": "OJ-Agent: 打开 Cookie 获取指引", "category": "OJ-Agent" },
-
-      { "command": "ojAgent.workspace.setRoot", "title": "OJ-Agent: 设置工作区根目录", "category": "OJ-Agent" },
-      { "command": "ojAgent.statusBar.openQuickPick", "title": "OJ-Agent: 状态栏 QuickPick", "category": "OJ-Agent" },
-      { "command": "ojAgent.openOutputChannel", "title": "OJ-Agent: 打开 OutputChannel", "category": "OJ-Agent" },
-
-      { "command": "ojAgent.problems.search", "title": "OJ-Agent: 搜索题目", "category": "OJ-Agent", "icon": "$(search)" },
-      { "command": "ojAgent.problems.filterDifficulty", "title": "OJ-Agent: 按难度筛选", "category": "OJ-Agent", "icon": "$(filter)" },
-      { "command": "ojAgent.problems.filterTags", "title": "OJ-Agent: 按标签筛选", "category": "OJ-Agent", "icon": "$(tag)" },
-      { "command": "ojAgent.problems.prevPage", "title": "OJ-Agent: 上一页", "category": "OJ-Agent", "icon": "$(arrow-left)" },
-      { "command": "ojAgent.problems.nextPage", "title": "OJ-Agent: 下一页", "category": "OJ-Agent", "icon": "$(arrow-right)" },
-      { "command": "ojAgent.problems.refresh", "title": "OJ-Agent: 刷新题库", "category": "OJ-Agent", "icon": "$(refresh)" }
+      {
+        "command": "ojAgent.ai.explainError",
+        "title": "OJ-Agent: AI · 解释错因",
+        "category": "OJ-Agent"
+      },
+      {
+        "command": "ojAgent.ai.generateApproach",
+        "title": "OJ-Agent: AI · 生成解题思路",
+        "category": "OJ-Agent"
+      },
+      {
+        "command": "ojAgent.ai.generateSolution",
+        "title": "OJ-Agent: AI · 生成完整题解",
+        "category": "OJ-Agent"
+      },
+      {
+        "command": "ojAgent.ai.explainCode",
+        "title": "OJ-Agent: AI · 解释当前代码",
+        "category": "OJ-Agent"
+      },
+      {
+        "command": "ojAgent.ai.switchProfile",
+        "title": "OJ-Agent: 切换 AI 模型 Profile",
+        "category": "OJ-Agent"
+      },
+      {
+        "command": "ojAgent.ai.testConnection",
+        "title": "OJ-Agent: AI · 测试连接",
+        "category": "OJ-Agent"
+      },
+      {
+        "command": "ojAgent.ai.openSettings",
+        "title": "OJ-Agent: 打开 AI 模型设置",
+        "category": "OJ-Agent",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "ojAgent.ai.openPanel",
+        "title": "OJ-Agent: 打开 AI 助手面板",
+        "category": "OJ-Agent",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "ojAgent.ai.addProfile",
+        "title": "OJ-Agent: 新建 AI Profile",
+        "category": "OJ-Agent",
+        "icon": "$(add)"
+      },
+      {
+        "command": "ojAgent.ai.refreshProfiles",
+        "title": "OJ-Agent: 刷新 Profile 列表",
+        "category": "OJ-Agent",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "ojAgent.ai.setActiveProfile",
+        "title": "OJ-Agent: 设为活动 Profile",
+        "category": "OJ-Agent",
+        "icon": "$(check)"
+      },
+      {
+        "command": "ojAgent.ai.deleteProfile",
+        "title": "OJ-Agent: 删除 Profile",
+        "category": "OJ-Agent",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "ojAgent.ai.editProfile",
+        "title": "OJ-Agent: 编辑 Profile",
+        "category": "OJ-Agent",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "ojAgent.platform.pullByUrl",
+        "title": "OJ-Agent: 粘贴 URL 拉取题目",
+        "category": "OJ-Agent",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "ojAgent.platform.pullProblem",
+        "title": "OJ-Agent: 拉取到本地",
+        "category": "OJ-Agent",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "ojAgent.platform.openInBrowser",
+        "title": "OJ-Agent: 浏览器中打开",
+        "category": "OJ-Agent",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "ojAgent.platform.refreshProblem",
+        "title": "OJ-Agent: 刷新题面",
+        "category": "OJ-Agent",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "ojAgent.platform.addCustomCase",
+        "title": "OJ-Agent: 添加自定义用例",
+        "category": "OJ-Agent",
+        "icon": "$(add)"
+      },
+      {
+        "command": "ojAgent.platform.copyProblemId",
+        "title": "OJ-Agent: 复制题目 ID",
+        "category": "OJ-Agent"
+      },
+      {
+        "command": "ojAgent.platform.openProblemView",
+        "title": "OJ-Agent: 打开题面 Webview",
+        "category": "OJ-Agent"
+      },
+      {
+        "command": "ojAgent.judge.runAll",
+        "title": "OJ-Agent: 本地测试 · 全部用例",
+        "category": "OJ-Agent",
+        "icon": "$(play)"
+      },
+      {
+        "command": "ojAgent.judge.runCase",
+        "title": "OJ-Agent: 本地测试 · 单用例",
+        "category": "OJ-Agent"
+      },
+      {
+        "command": "ojAgent.judge.openToolchain",
+        "title": "OJ-Agent: 查看工具链状态",
+        "category": "OJ-Agent"
+      },
+      {
+        "command": "ojAgent.submission.submit",
+        "title": "OJ-Agent: 提交当前题解",
+        "category": "OJ-Agent",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "ojAgent.submission.openLatest",
+        "title": "OJ-Agent: 打开最近一次提交结果",
+        "category": "OJ-Agent"
+      },
+      {
+        "command": "ojAgent.auth.login",
+        "title": "OJ-Agent: 登录 OJ 平台(浏览器自动)",
+        "category": "OJ-Agent"
+      },
+      {
+        "command": "ojAgent.auth.loginManual",
+        "title": "OJ-Agent: 登录 OJ 平台(手动粘贴 Cookie)",
+        "category": "OJ-Agent"
+      },
+      {
+        "command": "ojAgent.auth.logout",
+        "title": "OJ-Agent: 登出 OJ 平台",
+        "category": "OJ-Agent"
+      },
+      {
+        "command": "ojAgent.auth.relogin",
+        "title": "OJ-Agent: 重新登录 OJ 平台",
+        "category": "OJ-Agent"
+      },
+      {
+        "command": "ojAgent.auth.openCookieGuide",
+        "title": "OJ-Agent: 打开 Cookie 获取指引",
+        "category": "OJ-Agent"
+      },
+      {
+        "command": "ojAgent.workspace.setRoot",
+        "title": "OJ-Agent: 设置工作区根目录",
+        "category": "OJ-Agent"
+      },
+      {
+        "command": "ojAgent.statusBar.openQuickPick",
+        "title": "OJ-Agent: 状态栏 QuickPick",
+        "category": "OJ-Agent"
+      },
+      {
+        "command": "ojAgent.openOutputChannel",
+        "title": "OJ-Agent: 打开 OutputChannel",
+        "category": "OJ-Agent"
+      },
+      {
+        "command": "ojAgent.problems.search",
+        "title": "OJ-Agent: 搜索题目",
+        "category": "OJ-Agent",
+        "icon": "$(search)"
+      },
+      {
+        "command": "ojAgent.problems.filterDifficulty",
+        "title": "OJ-Agent: 按难度筛选",
+        "category": "OJ-Agent",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "ojAgent.problems.filterTags",
+        "title": "OJ-Agent: 按标签筛选",
+        "category": "OJ-Agent",
+        "icon": "$(tag)"
+      },
+      {
+        "command": "ojAgent.problems.prevPage",
+        "title": "OJ-Agent: 上一页",
+        "category": "OJ-Agent",
+        "icon": "$(arrow-left)"
+      },
+      {
+        "command": "ojAgent.problems.nextPage",
+        "title": "OJ-Agent: 下一页",
+        "category": "OJ-Agent",
+        "icon": "$(arrow-right)"
+      },
+      {
+        "command": "ojAgent.problems.refresh",
+        "title": "OJ-Agent: 刷新题库",
+        "category": "OJ-Agent",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "ojAgent.openDebugPanel",
+        "title": "OJ-Agent: 打开 Debug 日志（dev）",
+        "category": "OJ-Agent",
+        "icon": "$(debug-console)"
+      }
     ],
     "viewsContainers": {
       "activitybar": [
-        { "id": "ojAgent", "title": "OJ-Agent", "icon": "resources/activity-icon.svg" }
+        {
+          "id": "ojAgent",
+          "title": "OJ-Agent",
+          "icon": "resources/activity-icon.svg"
+        }
       ]
     },
     "views": {
       "ojAgent": [
-        { "id": "ojAgent.problems", "name": "题库", "icon": "resources/activity-icon.svg", "contextualTitle": "OJ-Agent" },
-        { "id": "ojAgent.aiProfiles", "name": "AI Profiles", "icon": "resources/activity-icon.svg", "contextualTitle": "OJ-Agent" },
-        { "id": "ojAgent.aiActions", "name": "AI 操作", "icon": "resources/activity-icon.svg", "contextualTitle": "OJ-Agent" }
+        {
+          "id": "ojAgent.problems",
+          "name": "题库",
+          "icon": "resources/activity-icon.svg",
+          "contextualTitle": "OJ-Agent"
+        }
       ]
     },
     "menus": {
       "view/title": [
-        { "command": "ojAgent.problems.search", "when": "view == ojAgent.problems", "group": "navigation@1" },
-        { "command": "ojAgent.problems.filterDifficulty", "when": "view == ojAgent.problems", "group": "navigation@2" },
-        { "command": "ojAgent.problems.filterTags", "when": "view == ojAgent.problems", "group": "navigation@3" },
-        { "command": "ojAgent.problems.prevPage", "when": "view == ojAgent.problems", "group": "navigation@4" },
-        { "command": "ojAgent.problems.nextPage", "when": "view == ojAgent.problems", "group": "navigation@5" },
-        { "command": "ojAgent.problems.refresh", "when": "view == ojAgent.problems", "group": "navigation@6" },
-
-        { "command": "ojAgent.ai.openPanel", "when": "view == ojAgent.aiProfiles || view == ojAgent.aiActions", "group": "navigation@1" },
-        { "command": "ojAgent.ai.addProfile", "when": "view == ojAgent.aiProfiles", "group": "navigation@2" },
-        { "command": "ojAgent.ai.refreshProfiles", "when": "view == ojAgent.aiProfiles", "group": "navigation@3" },
-        { "command": "ojAgent.ai.openSettings", "when": "view == ojAgent.aiProfiles || view == ojAgent.aiActions", "group": "navigation@99" }
+        {
+          "command": "ojAgent.problems.search",
+          "when": "view == ojAgent.problems",
+          "group": "navigation@1"
+        },
+        {
+          "command": "ojAgent.problems.filterDifficulty",
+          "when": "view == ojAgent.problems",
+          "group": "navigation@2"
+        },
+        {
+          "command": "ojAgent.problems.filterTags",
+          "when": "view == ojAgent.problems",
+          "group": "navigation@3"
+        },
+        {
+          "command": "ojAgent.problems.prevPage",
+          "when": "view == ojAgent.problems",
+          "group": "navigation@4"
+        },
+        {
+          "command": "ojAgent.problems.nextPage",
+          "when": "view == ojAgent.problems",
+          "group": "navigation@5"
+        },
+        {
+          "command": "ojAgent.problems.refresh",
+          "when": "view == ojAgent.problems",
+          "group": "navigation@6"
+        },
+        {
+          "command": "ojAgent.ai.openSettings",
+          "when": "view == ojAgent.problems",
+          "group": "navigation@99"
+        }
       ],
       "view/item/context": [
-        { "command": "ojAgent.platform.pullProblem", "when": "view == ojAgent.problems && viewItem == problem", "group": "inline@1" },
-        { "command": "ojAgent.platform.openInBrowser", "when": "view == ojAgent.problems && viewItem == problem", "group": "inline@2" },
-        { "command": "ojAgent.platform.copyProblemId", "when": "view == ojAgent.problems && viewItem == problem", "group": "1_copy@1" },
-        { "command": "ojAgent.auth.login", "when": "view == ojAgent.problems && viewItem == platform-loggedout", "group": "inline@1" },
-        { "command": "ojAgent.auth.logout", "when": "view == ojAgent.problems && viewItem == platform-loggedin", "group": "inline@1" },
-        { "command": "ojAgent.auth.relogin", "when": "view == ojAgent.problems && viewItem == platform-loggedin", "group": "inline@2" },
-
-        { "command": "ojAgent.ai.setActiveProfile", "when": "view == ojAgent.aiProfiles && viewItem == profile-inactive", "group": "inline@1" },
-        { "command": "ojAgent.ai.editProfile", "when": "view == ojAgent.aiProfiles && viewItem =~ /^profile-/", "group": "inline@2" },
-        { "command": "ojAgent.ai.deleteProfile", "when": "view == ojAgent.aiProfiles && viewItem =~ /^profile-/", "group": "inline@3" }
+        {
+          "command": "ojAgent.platform.openInBrowser",
+          "when": "view == ojAgent.problems && viewItem == problem",
+          "group": "inline@1"
+        },
+        {
+          "command": "ojAgent.platform.copyProblemId",
+          "when": "view == ojAgent.problems && viewItem == problem",
+          "group": "1_copy@1"
+        },
+        {
+          "command": "ojAgent.auth.login",
+          "when": "view == ojAgent.problems && viewItem == platform-loggedout",
+          "group": "inline@1"
+        },
+        {
+          "command": "ojAgent.auth.logout",
+          "when": "view == ojAgent.problems && viewItem == platform-loggedin",
+          "group": "inline@1"
+        },
+        {
+          "command": "ojAgent.auth.relogin",
+          "when": "view == ojAgent.problems && viewItem == platform-loggedin",
+          "group": "inline@2"
+        }
       ]
     },
     "configuration": {
@@ -111,50 +336,235 @@
           "description": "AI 模型 Profile 列表。注意：API Key 不在此处存储，仅保存在 VSCode SecretStorage。",
           "items": {
             "type": "object",
-            "required": ["id", "label", "provider", "model"],
+            "required": [
+              "id",
+              "label",
+              "provider",
+              "model"
+            ],
             "additionalProperties": false,
             "properties": {
-              "id": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "description": "Profile 唯一标识 (kebab-case)" },
-              "label": { "type": "string", "description": "用户可读名称" },
-              "provider": { "type": "string", "enum": ["openai", "anthropic"], "description": "协议格式" },
-              "baseUrl": { "type": "string", "description": "可选；缺省时使用 Provider 官方端点" },
-              "model": { "type": "string", "description": "模型 ID" },
-              "temperature": { "type": "number", "minimum": 0, "maximum": 2, "default": 0.2 },
-              "maxOutputTokens": { "type": "integer", "minimum": 1, "default": 2048 },
-              "maxInputTokens": { "type": "integer", "minimum": 1, "default": 32000 },
-              "requestTimeoutMs": { "type": "integer", "minimum": 1000, "default": 60000 },
-              "anthropicVersion": { "type": "string", "default": "2023-06-01", "description": "仅 provider=anthropic 生效" },
-              "extraHeaders": { "type": "object", "additionalProperties": { "type": "string" }, "default": {} }
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+                "description": "Profile 唯一标识 (kebab-case)"
+              },
+              "label": {
+                "type": "string",
+                "description": "用户可读名称"
+              },
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "openai",
+                  "anthropic"
+                ],
+                "description": "协议格式"
+              },
+              "baseUrl": {
+                "type": "string",
+                "description": "可选；缺省时使用 Provider 官方端点"
+              },
+              "model": {
+                "type": "string",
+                "description": "模型 ID"
+              },
+              "temperature": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 2,
+                "default": 0.2
+              },
+              "maxOutputTokens": {
+                "type": "integer",
+                "minimum": 1,
+                "default": 2048
+              },
+              "maxInputTokens": {
+                "type": "integer",
+                "minimum": 1,
+                "default": 32000
+              },
+              "requestTimeoutMs": {
+                "type": "integer",
+                "minimum": 1000,
+                "default": 60000
+              },
+              "anthropicVersion": {
+                "type": "string",
+                "default": "2023-06-01",
+                "description": "仅 provider=anthropic 生效"
+              },
+              "extraHeaders": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "default": {}
+              }
             }
           }
         },
-        "ojAgent.ai.activeProfileId": { "type": "string", "default": "", "description": "当前生效的 AI Profile id；为空表示未配置。" },
-        "ojAgent.ai.rateLimit.perMinute": { "type": "integer", "minimum": 1, "default": 20, "description": "AI 请求每分钟最大次数。" },
-        "ojAgent.ai.privacy.redact": { "type": "boolean", "default": true, "description": "默认开启：发送给 AI 端点的上下文中剥离 username/submissionId/Cookie/Authorization 等敏感字段。" },
-
-        "ojAgent.workspace.root": { "type": "string", "default": "", "description": "OJ 题库工作区根目录；为空时使用 ${userHome}/oj-agent-workspace。" },
+        "ojAgent.ai.activeProfileId": {
+          "type": "string",
+          "default": "",
+          "description": "当前生效的 AI Profile id；为空表示未配置。"
+        },
+        "ojAgent.ai.rateLimit.perMinute": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 20,
+          "description": "AI 请求每分钟最大次数。"
+        },
+        "ojAgent.ai.privacy.redact": {
+          "type": "boolean",
+          "default": true,
+          "description": "默认开启：发送给 AI 端点的上下文中剥离 username/submissionId/Cookie/Authorization 等敏感字段。"
+        },
+        "ojAgent.workspace.root": {
+          "type": "string",
+          "default": "",
+          "description": "OJ 题库工作区根目录；为空时使用 ${userHome}/oj-agent-workspace。"
+        },
         "ojAgent.platforms.enabled": {
           "type": "array",
-          "default": ["leetcode-cn", "hdoj"],
+          "default": [
+            "leetcode-cn",
+            "hdoj",
+            "codeforces",
+            "luogu",
+            "poj",
+            "lanqiao"
+          ],
           "description": "启用的 OJ 平台 id 列表。空数组等同于隐藏所有 OJ 平台 UI。",
-          "items": { "type": "string", "enum": ["leetcode-cn", "hdoj", "codeforces", "luogu", "poj", "lanqiao"] }
+          "items": {
+            "type": "string",
+            "enum": [
+              "leetcode-cn",
+              "hdoj",
+              "codeforces",
+              "luogu",
+              "poj",
+              "lanqiao"
+            ]
+          }
         },
-        "ojAgent.http.proxy": { "type": "string", "default": "", "description": "出网 HTTP 代理 URL（如 http://127.0.0.1:7890）；为空时不使用代理。" },
-        "ojAgent.http.rateLimit.leetcode-cn": { "type": "integer", "minimum": 1, "default": 30, "description": "LeetCode CN 每分钟最大请求数。" },
-        "ojAgent.http.rateLimit.hdoj": { "type": "integer", "minimum": 1, "default": 60, "description": "HDOJ 每分钟最大请求数。" },
-        "ojAgent.lang.cpp.compile": { "type": "string", "default": "", "description": "C++ 编译模板（占位符 {src} {out}）；为空使用默认 g++。" },
-        "ojAgent.lang.cpp.run": { "type": "string", "default": "", "description": "C++ 运行模板（占位符 {out}）。" },
-        "ojAgent.lang.python3.run": { "type": "string", "default": "", "description": "Python3 运行模板（占位符 {src}）。" },
-        "ojAgent.lang.java.compile": { "type": "string", "default": "", "description": "Java 编译模板（占位符 {src} {dir}）。" },
-        "ojAgent.lang.java.run": { "type": "string", "default": "", "description": "Java 运行模板（占位符 {dir} {main}）。" },
-        "ojAgent.lang.javascript.run": { "type": "string", "default": "", "description": "JavaScript 运行模板（占位符 {src}）。" },
-        "ojAgent.judge.timeoutMs": { "type": "integer", "minimum": 100, "maximum": 60000, "default": 3000, "description": "单 case 运行超时（ms）。" },
-        "ojAgent.submission.minIntervalMs": { "type": "integer", "minimum": 0, "default": 5000, "description": "同平台两次提交的最小间隔（ms）。" },
-        "ojAgent.submission.pollTimeoutMs": { "type": "integer", "minimum": 1000, "default": 60000, "description": "提交结果轮询超时（ms）。" },
-        "ojAgent.submission.confirmBeforeSubmit": { "type": "boolean", "default": true, "description": "提交前是否弹窗二次确认。" },
+        "ojAgent.http.proxy": {
+          "type": "string",
+          "default": "",
+          "description": "出网 HTTP 代理 URL（如 http://127.0.0.1:7890）；为空时不使用代理。"
+        },
+        "ojAgent.http.timeoutMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 120000,
+          "default": 15000,
+          "description": "HTTP 请求默认超时（毫秒）。"
+        },
+        "ojAgent.http.requestIntervalMs": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "同平台两次请求之间的最小间隔（毫秒），0 不限制。"
+        },
+        "ojAgent.http.rateLimit.leetcode-cn": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 30,
+          "description": "LeetCode CN 每分钟最大请求数。"
+        },
+        "ojAgent.http.rateLimit.hdoj": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 60,
+          "description": "HDOJ 每分钟最大请求数。"
+        },
+        "ojAgent.http.rateLimit.codeforces": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 30,
+          "description": "Codeforces 每分钟最大请求数。"
+        },
+        "ojAgent.http.rateLimit.luogu": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 30,
+          "description": "洛谷每分钟最大请求数。"
+        },
+        "ojAgent.http.rateLimit.poj": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 20,
+          "description": "POJ 每分钟最大请求数。"
+        },
+        "ojAgent.http.rateLimit.lanqiao": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 30,
+          "description": "蓝桥云课每分钟最大请求数。"
+        },
+        "ojAgent.lang.cpp.compile": {
+          "type": "string",
+          "default": "",
+          "description": "C++ 编译模板（占位符 {src} {out}）；为空使用默认 g++。"
+        },
+        "ojAgent.lang.cpp.run": {
+          "type": "string",
+          "default": "",
+          "description": "C++ 运行模板（占位符 {out}）。"
+        },
+        "ojAgent.lang.python3.run": {
+          "type": "string",
+          "default": "",
+          "description": "Python3 运行模板（占位符 {src}）。"
+        },
+        "ojAgent.lang.java.compile": {
+          "type": "string",
+          "default": "",
+          "description": "Java 编译模板（占位符 {src} {dir}）。"
+        },
+        "ojAgent.lang.java.run": {
+          "type": "string",
+          "default": "",
+          "description": "Java 运行模板（占位符 {dir} {main}）。"
+        },
+        "ojAgent.lang.javascript.run": {
+          "type": "string",
+          "default": "",
+          "description": "JavaScript 运行模板（占位符 {src}）。"
+        },
+        "ojAgent.judge.timeoutMs": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 60000,
+          "default": 3000,
+          "description": "单 case 运行超时（ms）。"
+        },
+        "ojAgent.submission.minIntervalMs": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 5000,
+          "description": "同平台两次提交的最小间隔（ms）。"
+        },
+        "ojAgent.submission.pollTimeoutMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "default": 60000,
+          "description": "提交结果轮询超时（ms）。"
+        },
+        "ojAgent.submission.confirmBeforeSubmit": {
+          "type": "boolean",
+          "default": true,
+          "description": "提交前是否弹窗二次确认。"
+        },
         "ojAgent.ui.defaultLang": {
           "type": "string",
-          "enum": ["cpp", "python3", "java", "javascript"],
+          "enum": [
+            "cpp",
+            "python3",
+            "java",
+            "javascript"
+          ],
           "default": "cpp",
           "description": "拉题时默认生成的 solution 语言。"
         }
@@ -164,10 +574,13 @@
   "scripts": {
     "build": "tsc -p .",
     "watch": "tsc -p . -w",
-    "test": "node --test --import tsx \"test/**/*.test.ts\""
+    "test": "node --test --import tsx \"test/**/*.test.ts\"",
+    "package": "node ../../scripts/vsce-package.mjs",
+    "vsce:publish": "node ../../scripts/vsce-package.mjs --publish"
   },
   "dependencies": {
     "@oj-agent/core": "workspace:*",
+    "highlight.js": "^11.11.1",
     "katex": "^0.16.11",
     "markdown-it": "^14.1.0",
     "markdown-it-texmath": "^1.0.0"
@@ -179,6 +592,8 @@
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.0.0",
+    "esbuild": "^0.23.0",
     "tsx": "^4.7.0",
     "typescript": "^5.4.0"
   }

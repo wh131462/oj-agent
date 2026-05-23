@@ -1,8 +1,14 @@
 {
   "name": "@oj-agent/core",
   "version": "0.1.0",
-  "private": true,
   "description": "OJ-Agent core engine. Platform-agnostic. Used by both CLI and VSCode extension.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wh131462/oj-agent.git",
+    "directory": "packages/core"
+  },
+  "keywords": ["oj", "leetcode", "codeforces", "hdoj", "luogu", "poj", "online-judge"],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -13,6 +19,9 @@
     }
   },
   "files": ["dist", "src"],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p .",
     "watch": "tsc -p . -w",
@@ -20,6 +29,7 @@
   },
   "dependencies": {
     "cheerio": "^1.0.0",
+    "chokidar": "^3.6.0",
     "iconv-lite": "^0.6.3",
     "undici": "^6.19.8"
   },

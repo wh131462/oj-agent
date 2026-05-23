@@ -1,13 +1,22 @@
 {
   "name": "@oj-agent/cli",
   "version": "0.1.0",
-  "private": true,
-  "description": "OJ-Agent CLI (oja). M1: login / list / pull / test / submit / config / toolchain.",
+  "description": "OJ-Agent CLI (oja). Multi-OJ workflow: login / list / pull / test / submit.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wh131462/oj-agent.git",
+    "directory": "packages/cli"
+  },
+  "keywords": ["oj", "cli", "leetcode", "codeforces", "competitive-programming"],
   "type": "module",
   "bin": {
     "oja": "./dist/index.js"
   },
   "files": ["dist", "src"],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p .",
     "watch": "tsc -p . -w",
