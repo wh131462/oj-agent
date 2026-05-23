@@ -31,8 +31,8 @@ export async function parseListPage(html: string, volume: number): Promise<Platf
     .map((_, el) => $(el).text())
     .get();
   for (const sc of scripts) {
-    // 形如:p(<id>,<ac>,<sub>,<title>,<source>,<author>);
-    const re = /p\((\d+),\d+,\d+,"([^"]+)"/g;
+    // 形如:p(<color>,<pid>,<solved>,"<title>",<ac>,<sub>); solved 可为 -1
+    const re = /p\(-?\d+,(\d+),-?\d+,"([^"]+)"/g;
     let m: RegExpExecArray | null;
     while ((m = re.exec(sc)) !== null) {
       const id = m[1]!;

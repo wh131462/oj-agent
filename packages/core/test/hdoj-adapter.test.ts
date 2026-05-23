@@ -52,8 +52,8 @@ test('HDOJ: listProblems 解析 JS p() 调用', async () => {
   const html = `
 <html><body>
 <script>
-p(1000,123,456,"A + B Problem","HDU","admin");
-p(1001,50,500,"Sum Problem","HDU","admin");
+p(0,1000,-1,"A + B Problem",123,456);
+p(1,1001,-1,"Sum Problem",50,500);
 </script>
 </body></html>
   `;

@@ -6,8 +6,8 @@ export interface ConfigBackend {
   update<T>(key: string, value: T): Promise<void>;
 }
 
-const PROFILES_KEY = 'profiles';
-const ACTIVE_KEY = 'activeProfileId';
+const PROFILES_KEY = 'ai.profiles';
+const ACTIVE_KEY = 'ai.activeProfileId';
 
 export class ProfileStore {
   constructor(private readonly cfg: ConfigBackend) {}

@@ -49,7 +49,7 @@ test('LeetCode: listProblems 关键字 / 难度 / 分页透传 GraphQL', async (
                 titleCn: '两数之和',
                 titleSlug: 'two-sum',
                 difficulty: 'EASY',
-                topicTags: [{ name: 'Array', translatedName: '数组', slug: 'array' }],
+                topicTags: [{ name: 'Array', nameTranslated: '数组', slug: 'array' }],
               },
             ],
           },

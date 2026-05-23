@@ -5,6 +5,7 @@
 import { AdapterError } from '../errors.js';
 import type {
   PlatformAdapter,
+  PlatformCapabilities,
   PlatformCredential,
   PlatformListQuery,
   PlatformProblemDetail,
@@ -33,7 +34,7 @@ query problemsetQuestionList($categorySlug: String, $limit: Int, $skip: Int, $fi
       titleSlug
       topicTags {
         name
-        translatedName
+        nameTranslated
         slug
       }
     }
@@ -85,9 +86,18 @@ interface ProblemMetaCache {
 
 export class LeetCodeCnAdapter implements PlatformAdapter {
   readonly id = 'leetcode-cn' as const;
+  readonly capabilities: PlatformCapabilities = {
+    listProblems: true,
+    getProblem: true,
+    submit: true,
+    pollResult: true,
+    autoLogin: false,
+  };
   private readonly gql: LeetCodeCnGraphQLClient;
   /** slug -> questionId 缓存,提交时使用 */
   private readonly metaCache = new Map<string, ProblemMetaCache>();
+  /** frontendQuestionId -> titleSlug 缓存,getProblem 时使用 */
+  private readonly idToSlugCache = new Map<string, string>();
 
   constructor(private readonly deps: RegistryDeps) {
     this.gql = new LeetCodeCnGraphQLClient(deps.httpClient, deps.credentialStore);
@@ -118,7 +128,7 @@ export class LeetCodeCnAdapter implements PlatformAdapter {
           titleCn?: string;
           titleSlug: string;
           difficulty: string;
-          topicTags?: Array<{ name: string; translatedName?: string; slug: string }>;
+          topicTags?: Array<{ name: string; nameTranslated?: string; slug: string }>;
         }>;
       };
     }>({
@@ -132,17 +142,36 @@ export class LeetCodeCnAdapter implements PlatformAdapter {
     });
 
     const list = data.problemsetQuestionList?.questions ?? [];
+    // 填充 ID→slug 缓存
+    for (const q of list) {
+      this.idToSlugCache.set(q.frontendQuestionId, q.titleSlug);
+    }
     return list.map((q) => ({
       platform: this.id,
       id: q.frontendQuestionId,
       title: q.titleCn || q.title,
       difficulty: normalizeDifficulty(q.difficulty),
-      tags: (q.topicTags ?? []).map((t) => t.translatedName || t.name),
+      tags: (q.topicTags ?? []).map((t) => t.nameTranslated || t.name),
       url: `https://leetcode.cn/problems/${q.titleSlug}/`,
     }));
   }
 
   async getProblem(slugOrId: string): Promise<PlatformProblemDetail> {
+    // 若传入的是纯数字 ID,尝试从缓存查 slug
+    let titleSlug = slugOrId;
+    if (/^\d+$/.test(slugOrId)) {
+      const cached = this.idToSlugCache.get(slugOrId);
+      if (cached) {
+        titleSlug = cached;
+      } else {
+        throw new AdapterError(
+          'NOT_FOUND',
+          `题目 ID ${slugOrId} 缺少 slug 缓存,请先通过列表加载,或使用 slug/URL 重试`,
+          false,
+        );
+      }
+    }
+
     const data = await this.gql.exec<{
       question: {
         questionId: string;
@@ -161,7 +190,7 @@ export class LeetCodeCnAdapter implements PlatformAdapter {
       };
     }>({
       query: QUESTION_DATA_QUERY,
-      variables: { titleSlug: slugOrId },
+      variables: { titleSlug },
     });
 
     const q = data.question;
@@ -213,10 +242,21 @@ export class LeetCodeCnAdapter implements PlatformAdapter {
     }
 
     // 需要 questionId,若缓存缺失则先 getProblem
-    let meta = this.metaCache.get(slugOrId);
+    // metaCache 一律按 titleSlug 存取；若入参是数字 frontendId 先翻成 slug
+    let cacheKey = slugOrId;
+    if (/^\d+$/.test(slugOrId)) {
+      const cached = this.idToSlugCache.get(slugOrId);
+      if (cached) cacheKey = cached;
+    }
+    let meta = this.metaCache.get(cacheKey);
     if (!meta) {
       await this.getProblem(slugOrId);
-      meta = this.metaCache.get(slugOrId);
+      // getProblem 内部已把 idToSlugCache → titleSlug 写入 metaCache
+      if (/^\d+$/.test(slugOrId)) {
+        const cached = this.idToSlugCache.get(slugOrId);
+        if (cached) cacheKey = cached;
+      }
+      meta = this.metaCache.get(cacheKey);
     }
     if (!meta) {
       throw new AdapterError('NOT_FOUND', `题目元数据不可得: ${slugOrId}`, false);

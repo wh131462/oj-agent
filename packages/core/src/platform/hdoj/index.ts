@@ -5,6 +5,7 @@
 import { AdapterError } from '../errors.js';
 import type {
   PlatformAdapter,
+  PlatformCapabilities,
   PlatformCredential,
   PlatformListQuery,
   PlatformProblemDetail,
@@ -30,6 +31,13 @@ const LANG_MAP: Record<string, number> = {
 
 export class HDOJAdapter implements PlatformAdapter {
   readonly id = 'hdoj' as const;
+  readonly capabilities: PlatformCapabilities = {
+    listProblems: true,
+    getProblem: true,
+    submit: true,
+    pollResult: true,
+    autoLogin: false,
+  };
 
   constructor(private readonly deps: RegistryDeps) {}
 

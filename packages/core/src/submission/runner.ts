@@ -101,7 +101,11 @@ export class SubmissionRunner {
     emit({ stage: 'judging' });
     let result: PlatformJudgeResult;
     try {
-      result = await adapter.pollResult(sid);
+      result = await withPollTimeout(
+        adapter.pollResult(sid),
+        input.pollTimeoutMs,
+        input.platform,
+      );
     } catch (e) {
       throw wrapError(e);
     }
@@ -109,6 +113,29 @@ export class SubmissionRunner {
     emit({ stage: 'done', result });
     return result;
   }
+}
+
+function withPollTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number | undefined,
+  platform: PlatformId,
+): Promise<T> {
+  if (!timeoutMs || timeoutMs <= 0) return promise;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(
+        new AdapterError(
+          'JUDGING_TIMEOUT',
+          `${platform} 评测轮询超过 ${timeoutMs}ms`,
+          true,
+        ),
+      );
+    }, timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
 }
 
 function wrapError(e: unknown): Error {
