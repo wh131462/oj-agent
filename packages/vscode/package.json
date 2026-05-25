@@ -246,12 +246,6 @@
         "title": "OJ-Agent: 清除题库筛选",
         "category": "OJ-Agent",
         "icon": "$(clear-all)"
-      },
-      {
-        "command": "ojAgent.openDebugPanel",
-        "title": "OJ-Agent: 打开 Debug 日志（dev）",
-        "category": "OJ-Agent",
-        "icon": "$(debug-console)"
       }
     ],
     "viewsContainers": {
@@ -303,14 +297,14 @@
           "group": "inline@1"
         },
         {
-          "command": "ojAgent.auth.logout",
-          "when": "view == ojAgent.problems && viewItem == platform-loggedin",
-          "group": "inline@1"
-        },
-        {
           "command": "ojAgent.auth.relogin",
           "when": "view == ojAgent.problems && viewItem == platform-loggedin",
-          "group": "inline@2"
+          "group": "1_account@1"
+        },
+        {
+          "command": "ojAgent.auth.logout",
+          "when": "view == ojAgent.problems && viewItem == platform-loggedin",
+          "group": "1_account@2"
         },
         {
           "command": "ojAgent.problems.search",

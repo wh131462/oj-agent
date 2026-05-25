@@ -6,6 +6,7 @@ import type {
   PlatformProblemSummary,
   CredentialChecker,
   CredentialStatus,
+  CredentialStore,
 } from '@oj-agent/core';
 import type { VSCodeConfigBackend } from '../backends/vscode-config.js';
 import { getEnabledPlatforms } from '../oj-services.js';
@@ -28,6 +29,7 @@ interface PlatformState {
   loading: boolean;
   lastError?: string;
   credStatus: CredentialStatus;
+  username?: string;
 }
 
 const DEFAULT_PAGE_SIZE = 50;
@@ -57,6 +59,7 @@ export class ProblemTreeDataProvider implements vscode.TreeDataProvider<ProblemT
     private readonly registry: PlatformAdapterRegistry,
     private readonly credentialChecker: CredentialChecker,
     private readonly configBackend: VSCodeConfigBackend,
+    private readonly credentialStore: CredentialStore,
   ) {}
 
   refresh(): void {
@@ -384,9 +387,21 @@ export class ProblemTreeDataProvider implements vscode.TreeDataProvider<ProblemT
     const s = this.getOrInitState(platform);
     void this.credentialChecker
       .check(platform)
-      .then((st) => {
-        if (s.credStatus !== st) {
-          s.credStatus = st;
+      .then(async (st) => {
+        let username: string | undefined;
+        let cred: import('@oj-agent/core').PlatformCredential | undefined;
+        try {
+          cred = await this.credentialStore.get(platform);
+          username = cred?.extra?.username;
+        } catch {
+          /* ignore */
+        }
+        // unknown 状态时，若本地有凭证则视为已登录（poj/codeforces/luogu 无服务端校验逻辑）
+        const effective: import('@oj-agent/core').CredentialStatus =
+          st === 'unknown' && cred ? 'valid' : st;
+        if (s.credStatus !== effective || s.username !== username) {
+          s.credStatus = effective;
+          s.username = username;
           this.emitter.fire(undefined);
         }
       })
@@ -416,8 +431,11 @@ export class ProblemTreeDataProvider implements vscode.TreeDataProvider<ProblemT
 
   private platformDesc(s: PlatformState): string {
     const parts: string[] = [];
-    if (s.credStatus === 'valid') parts.push('已登录');
-    else if (s.credStatus === 'expired') parts.push('未登录');
+    if (s.credStatus === 'valid') {
+      parts.push(s.username ? s.username : '已登录');
+    } else if (s.credStatus === 'expired') {
+      parts.push('未登录');
+    }
     if (s.query.keyword) parts.push(`kw:${s.query.keyword}`);
     if (s.query.difficulty) parts.push(s.query.difficulty);
     if (s.query.tags?.length) parts.push(`tags:${s.query.tags.length}`);

@@ -18,7 +18,6 @@ import { registerAuthCommands } from './extension/commands/auth.js';
 import { registerStatusBarCommands } from './extension/commands/status-bar.js';
 import { ProblemContextProvider } from './extension/context-providers/problem.js';
 import { TestCaseContextProvider } from './extension/context-providers/test-case.js';
-import { DebugWebviewPanel } from './extension/views/debug-webview-panel.js';
 import { findProblemDir } from './extension/utils/workspace-resolver.js';
 import type { ProblemRef } from './extension/utils/problem-ref.js';
 
@@ -35,16 +34,6 @@ export function activate(ctx: vscode.ExtensionContext): void {
   // 注册 AI 相关命令(SettingsPanel 需要 oj 中的 credentialStore/configBackend)
   for (const d of registerCommands(ctx, aiServices, { profilesView: { refresh: () => { /* noop: sidebar AI view removed */ } } }, oj)) {
     ctx.subscriptions.push(d);
-  }
-
-  // Debug 日志面板：仅 dev 模式注册命令
-  const isDev = ctx.extensionMode === vscode.ExtensionMode.Development;
-  if (isDev) {
-    ctx.subscriptions.push(
-      vscode.commands.registerCommand('ojAgent.openDebugPanel', () => {
-        DebugWebviewPanel.show(oj.debugLogs);
-      }),
-    );
   }
 
   // AI 启用判断
@@ -88,7 +77,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
   };
 
   // ---- views ----
-  const problemTree = new ProblemTreeDataProvider(ctx, oj.registry, oj.credentialChecker, oj.configBackend);
+  const problemTree = new ProblemTreeDataProvider(ctx, oj.registry, oj.credentialChecker, oj.configBackend, oj.credentialStore);
   ctx.subscriptions.push(
     vscode.window.registerTreeDataProvider('ojAgent.problems', problemTree),
   );

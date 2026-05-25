@@ -76,10 +76,10 @@ export class AIActionsProvider implements vscode.TreeDataProvider<ActionNode> {
   getChildren(): ActionNode[] {
     return [
       { kind: 'action', label: '打开 AI 助手面板', icon: 'comment-discussion', commandId: 'ojAgent.ai.openPanel' },
-      { kind: 'action', label: 'AI · 解释错因', icon: 'bug', commandId: 'ojAgent.ai.explainError' },
-      { kind: 'action', label: 'AI · 生成解题思路', icon: 'lightbulb', commandId: 'ojAgent.ai.generateApproach' },
-      { kind: 'action', label: 'AI · 生成完整题解', icon: 'rocket', commandId: 'ojAgent.ai.generateSolution' },
-      { kind: 'action', label: 'AI · 解释当前代码', icon: 'symbol-method', commandId: 'ojAgent.ai.explainCode' },
+      { kind: 'action', label: 'AI-解释错因', icon: 'bug', commandId: 'ojAgent.ai.explainError' },
+      { kind: 'action', label: 'AI-生成解题思路', icon: 'lightbulb', commandId: 'ojAgent.ai.generateApproach' },
+      { kind: 'action', label: 'AI-生成完整题解', icon: 'rocket', commandId: 'ojAgent.ai.generateSolution' },
+      { kind: 'action', label: 'AI-解释当前代码', icon: 'symbol-method', commandId: 'ojAgent.ai.explainCode' },
       { kind: 'action', label: '切换 AI 模型 Profile', icon: 'arrow-swap', commandId: 'ojAgent.ai.switchProfile' },
       { kind: 'action', label: '测试连接', icon: 'plug', commandId: 'ojAgent.ai.testConnection' },
     ];

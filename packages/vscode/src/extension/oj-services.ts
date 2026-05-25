@@ -16,13 +16,11 @@ import {
 import { VSCodeSecretBackend } from './backends/vscode-secret.js';
 import { VSCodeConfigBackend } from './backends/vscode-config.js';
 import { VSCodeOutputChannelLogger } from './backends/vscode-output-channel-logger.js';
-import { DebugLogStore } from './views/debug-panel.js';
 import { SharedConfigStore } from '@oj-agent/core';
 
 export interface OJServices {
   logger: VSCodeOutputChannelLogger;
   loggerBackend: LoggerBackend;
-  debugLogs: DebugLogStore;
   secretBackend: VSCodeSecretBackend;
   configBackend: VSCodeConfigBackend;
   credentialStore: CredentialStore;
@@ -45,20 +43,15 @@ export function buildOJServices(ctx: vscode.ExtensionContext): OJServices {
   const logger = new VSCodeOutputChannelLogger('OJ-Agent');
   ctx.subscriptions.push({ dispose: () => logger.dispose() });
 
-  const debugLogs = new DebugLogStore();
-
   const loggerBackend: LoggerBackend = {
     info(scope, msg, extra) {
       logger.info(scope, msg, extra);
-      debugLogs.info(scope, msg, extra);
     },
     warn(scope, msg, extra) {
       logger.warn(scope, msg, extra);
-      debugLogs.warn(scope, msg, extra);
     },
     error(scope, msg, err) {
       logger.error(scope, msg, err);
-      debugLogs.error(scope, msg, err);
     },
   };
 
@@ -118,7 +111,6 @@ export function buildOJServices(ctx: vscode.ExtensionContext): OJServices {
   return {
     logger,
     loggerBackend,
-    debugLogs,
     secretBackend,
     configBackend,
     credentialStore,

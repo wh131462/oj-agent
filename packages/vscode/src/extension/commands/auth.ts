@@ -307,10 +307,17 @@ export function registerAuthCommands(services: OJServices): vscode.Disposable[] 
       void vscode.window.showInformationMessage(`${platform} 已登出`);
     }),
     vscode.commands.registerCommand('ojAgent.auth.relogin', async (arg?: unknown) => {
-      // relogin 跳过 logout 命令的确认对话框,直接 delete + login
       let platform = extractPlatformArg(arg);
       if (!platform) platform = await pickPlatform();
       if (!platform) return;
+      const cred = await services.credentialStore.get(platform);
+      const userPart = cred?.extra?.username ? `(${cred.extra.username})` : '';
+      const confirm = await vscode.window.showWarningMessage(
+        `重新登录 ${platform}${userPart}? 当前凭证将先被清除。`,
+        { modal: true },
+        '继续',
+      );
+      if (confirm !== '继续') return;
       await services.credentialStore.delete(platform);
       await vscode.commands.executeCommand('ojAgent.auth.login', platform);
     }),
