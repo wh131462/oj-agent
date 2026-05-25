@@ -18,7 +18,7 @@ import { renderTemplate } from './template.js';
 import { firstDiff, normalize, unifiedDiff } from './normalize.js';
 import { buildDirExists, computeBuildHash, ensureBuildDir, getBuildDir } from './cache.js';
 
-export type JudgeLang = 'cpp' | 'python3' | 'java' | 'javascript';
+export type JudgeLang = 'cpp' | 'c' | 'python3' | 'java' | 'javascript';
 export type JudgeVerdict = 'AC' | 'WA' | 'TLE' | 'RE' | 'CE';
 
 export interface JudgeCaseInput {
@@ -31,6 +31,7 @@ export interface JudgeCaseResult {
   index: number;
   verdict: JudgeVerdict;
   timeMs: number;
+  input: string;
   stdout: string;
   stderr: string;
   expected?: string;
@@ -68,6 +69,11 @@ const LANG_DEFAULTS: Record<JudgeLang, LangDefaults> = {
     runCmd: '{out}',
     requiredTools: ['gpp'],
   },
+  c: {
+    compileCmd: 'gcc -O2 -std=c11 -o {out} {src}',
+    runCmd: '{out}',
+    requiredTools: ['gcc'],
+  },
   python3: {
     compileCmd: null,
     runCmd: 'python3 {src}',
@@ -87,6 +93,7 @@ const LANG_DEFAULTS: Record<JudgeLang, LangDefaults> = {
 
 const LANG_EXT: Record<JudgeLang, string> = {
   cpp: 'cpp',
+  c: 'c',
   python3: 'py',
   java: 'java',
   javascript: 'js',
@@ -94,6 +101,7 @@ const LANG_EXT: Record<JudgeLang, string> = {
 
 const INSTALL_HINTS: Record<keyof ToolchainSnapshot, string> = {
   gpp: '请安装 g++(macOS: xcode-select --install; Ubuntu: apt install g++)',
+  gcc: '请安装 gcc(macOS: xcode-select --install; Ubuntu: apt install gcc)',
   clangpp: '请安装 clang++',
   python3: '请安装 Python 3 (https://www.python.org/downloads/)',
   python: '请安装 Python',
@@ -220,6 +228,7 @@ export class JudgeRunner {
         index: c.index,
         verdict,
         timeMs,
+        input: c.input,
         stdout,
         stderr,
         expected: c.expected,

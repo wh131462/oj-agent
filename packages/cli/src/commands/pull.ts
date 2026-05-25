@@ -102,7 +102,16 @@ export const pullCommand: CommandModule = {
       await ctx.workspace.refresh(detail, problemDir);
       result = { problemDir, solutionPath: '' };
     } else {
-      const r = await ctx.workspace.writeProblem(detail, { rootDir, defaultLang: lang });
+      // 优先用 getProblemLangs 拿题目级语言能力（用于 codeSnippet 与 supportedLangs 对齐）
+      let problemLangs;
+      if (adapter.getProblemLangs) {
+        try {
+          problemLangs = await adapter.getProblemLangs(id);
+        } catch {
+          // 静默回退到 detail.codeSnippets / defaultTemplate
+        }
+      }
+      const r = await ctx.workspace.writeProblem(detail, { rootDir, defaultLang: lang, problemLangs });
       result = { problemDir: r.problemDir, solutionPath: r.solutionPath };
     }
 

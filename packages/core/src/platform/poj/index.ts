@@ -15,6 +15,7 @@ import type {
   PlatformProblemSummary,
   PlatformSubmissionId,
   PlatformJudgeResult,
+  ProblemLangInfo,
 } from '../adapter.js';
 import type { RegistryDeps } from '../registry.js';
 import { PojApi } from './api.js';
@@ -34,6 +35,13 @@ const LANG_MAP: Record<string, number> = {
   // POJ 不支持 python / javascript：拒绝即可
 };
 
+/** UI 展示名（getProblemLangs 用），与 LANG_MAP 的 key 对齐。 */
+const LANG_DISPLAY: Record<string, string> = {
+  cpp: 'G++',
+  c: 'GCC',
+  java: 'Java',
+};
+
 export class POJAdapter implements PlatformAdapter {
   readonly id = 'poj' as const;
   readonly capabilities: PlatformCapabilities = {
@@ -43,6 +51,7 @@ export class POJAdapter implements PlatformAdapter {
     pollResult: true,
     autoLogin: false,
   };
+  readonly supportedLangs: readonly string[] = Object.keys(LANG_MAP);
 
   private readonly api: PojApi;
 
@@ -80,20 +89,33 @@ export class POJAdapter implements PlatformAdapter {
     return parseProblemPage(html, pid);
   }
 
-  async submit(pid: string, lang: string, code: string): Promise<PlatformSubmissionId> {
+  /**
+   * POJ 不提供题目级语言列表 API；所有题目支持的语言一致，
+   * 直接由静态 LANG_MAP 包装为题目语言能力返回。
+   */
+  async getProblemLangs(_pid: string): Promise<ProblemLangInfo[]> {
+    return Object.entries(LANG_MAP).map(([lang, id]) => ({
+      lang,
+      displayName: LANG_DISPLAY[lang] ?? lang,
+      platformLangId: String(id),
+    }));
+  }
+
+  async submit(pid: string, lang: string, code: string, platformLangId?: string): Promise<PlatformSubmissionId> {
     const cred = await this.deps.credentialStore.get(this.id);
     if (!cred?.cookie) {
       throw new AdapterError('AUTH_REQUIRED', '请先登录 POJ', false);
     }
-    const langId = LANG_MAP[lang];
-    if (langId === undefined) {
+    // platformLangId 由调用方通过 getProblemLangs 解析；缺省回退到静态 LANG_MAP。
+    const langIdRaw = platformLangId ?? (LANG_MAP[lang] !== undefined ? String(LANG_MAP[lang]) : undefined);
+    if (langIdRaw === undefined) {
       throw new AdapterError('LANG_UNSUPPORTED', `POJ 不支持语言: ${lang}`, false);
     }
     const username = cred.extra?.username;
 
     const { status, html } = await this.api.submit({
       problem_id: pid,
-      language: String(langId),
+      language: langIdRaw,
       source: code,
       encoded: '0',
     });

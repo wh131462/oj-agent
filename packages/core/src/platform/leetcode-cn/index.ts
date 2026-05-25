@@ -14,6 +14,7 @@ import type {
   PlatformSubmissionId,
   PlatformJudgeResult,
   PlatformVerdict,
+  ProblemLangInfo,
 } from '../adapter.js';
 import type { RegistryDeps } from '../registry.js';
 import { LeetCodeCnGraphQLClient } from './graphql-client.js';
@@ -79,6 +80,14 @@ const LANG_MAP: Record<string, string> = {
   javascript: 'javascript',
 };
 
+/** UI 展示名（getProblemLangs 用），与 LANG_MAP 的 key 对齐。 */
+const LANG_DISPLAY: Record<string, string> = {
+  cpp: 'C++',
+  python3: 'Python3',
+  java: 'Java',
+  javascript: 'JavaScript',
+};
+
 interface ProblemMetaCache {
   questionId: string;
   titleSlug: string;
@@ -93,6 +102,7 @@ export class LeetCodeCnAdapter implements PlatformAdapter {
     pollResult: true,
     autoLogin: false,
   };
+  readonly supportedLangs: readonly string[] = Object.keys(LANG_MAP);
   private readonly gql: LeetCodeCnGraphQLClient;
   /** slug -> questionId 缓存,提交时使用 */
   private readonly metaCache = new Map<string, ProblemMetaCache>();
@@ -230,13 +240,33 @@ export class LeetCodeCnAdapter implements PlatformAdapter {
     };
   }
 
-  async submit(slugOrId: string, lang: string, code: string): Promise<PlatformSubmissionId> {
+  async getProblemLangs(slugOrId: string): Promise<ProblemLangInfo[]> {
+    // 复用 getProblem：LeetCode 题面接口已经在同一 GraphQL 调用里返回 codeSnippets，
+    // 这里不发额外请求。详情数据由上游缓存命中时也是免费的。
+    const detail = await this.getProblem(slugOrId);
+    const snippets = detail.codeSnippets ?? {};
+    const result: ProblemLangInfo[] = [];
+    for (const ourLang of Object.keys(LANG_MAP)) {
+      const slug = LANG_MAP[ourLang]!;
+      const snippet = snippets[slug];
+      if (snippet === undefined) continue;
+      result.push({
+        lang: ourLang,
+        displayName: LANG_DISPLAY[ourLang] ?? ourLang,
+        platformLangId: slug,
+        codeSnippet: snippet,
+      });
+    }
+    return result;
+  }
+
+  async submit(slugOrId: string, lang: string, code: string, platformLangId?: string): Promise<PlatformSubmissionId> {
     const cred = await this.deps.credentialStore.get(this.id);
     if (!cred?.cookie) {
       throw new AdapterError('AUTH_REQUIRED', '请先登录 LeetCode CN', false);
     }
 
-    const langSlug = LANG_MAP[lang];
+    const langSlug = platformLangId ?? LANG_MAP[lang];
     if (!langSlug) {
       throw new AdapterError('LANG_UNSUPPORTED', `LeetCode CN 不支持语言: ${lang}`, false);
     }

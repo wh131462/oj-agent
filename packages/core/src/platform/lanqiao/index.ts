@@ -19,6 +19,7 @@ import type {
   PlatformSubmissionId,
   PlatformJudgeResult,
   PlatformVerdict,
+  ProblemLangInfo,
 } from '../adapter.js';
 import type { RegistryDeps } from '../registry.js';
 import { LanqiaoApi } from './api.js';
@@ -34,6 +35,15 @@ const LANG_MAP: Record<string, string> = {
   javascript: 'javascript',
 };
 
+/** UI 展示名（getProblemLangs 用）。 */
+const LANG_DISPLAY: Record<string, string> = {
+  cpp: 'C++',
+  c: 'C',
+  java: 'Java',
+  python3: 'Python 3',
+  javascript: 'JavaScript',
+};
+
 export class LanqiaoAdapter implements PlatformAdapter {
   readonly id = 'lanqiao' as const;
   readonly capabilities: PlatformCapabilities = {
@@ -43,6 +53,7 @@ export class LanqiaoAdapter implements PlatformAdapter {
     pollResult: true,
     autoLogin: false,
   };
+  readonly supportedLangs: readonly string[] = Object.keys(LANG_MAP);
   readonly degraded: PlatformDegradedInfo[] = [
     {
       capability: 'listProblems',
@@ -138,13 +149,26 @@ export class LanqiaoAdapter implements PlatformAdapter {
     };
   }
 
+  /**
+   * 蓝桥云课题目详情未公开 languages 字段；语言列表对所有题目一致，
+   * 由静态 LANG_MAP 包装返回（不需要 JWT）。
+   */
+  async getProblemLangs(_id: string): Promise<ProblemLangInfo[]> {
+    return Object.entries(LANG_MAP).map(([lang, slug]) => ({
+      lang,
+      displayName: LANG_DISPLAY[lang] ?? lang,
+      platformLangId: slug,
+    }));
+  }
+
   async submit(
     id: string,
     lang: string,
     code: string,
+    platformLangId?: string,
   ): Promise<PlatformSubmissionId> {
     const jwt = await this.requireJwt('提交代码');
-    const language = LANG_MAP[lang];
+    const language = platformLangId ?? LANG_MAP[lang];
     if (!language) {
       throw new AdapterError('LANG_UNSUPPORTED', `蓝桥云课不支持语言: ${lang}`, false);
     }

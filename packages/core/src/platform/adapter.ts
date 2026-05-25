@@ -42,6 +42,26 @@ export interface PlatformProblemDetail extends PlatformProblemSummary {
   readonly memoryLimitKb?: number;
 }
 
+/**
+ * 题目级语言能力描述。由 PlatformAdapter.getProblemLangs 返回。
+ *
+ * 不是所有平台都能提供题目级语言列表（POJ/HDU/CF 等平台级一致，无此能力）。
+ * 调用方应在 getProblemLangs 未实现时回退到 adapter.supportedLangs。
+ */
+export interface ProblemLangInfo {
+  /** 与 adapter.supportedLangs 中的字符串一致（如 `cpp` / `python3`）。 */
+  readonly lang: string;
+  /** UI 展示用的可读名称（如 `C++` / `Python3` / `JavaScript`）。 */
+  readonly displayName: string;
+  /**
+   * 平台提交时实际需要回传的语言标识。
+   * 统一为 string；平台内部需要 number 时自行 Number() 转换。
+   */
+  readonly platformLangId: string;
+  /** 平台提供的初始代码模板（如 LeetCode 的函数签名片段），可空。 */
+  readonly codeSnippet?: string;
+}
+
 export interface PlatformListQuery {
   readonly page?: number;
   readonly pageSize?: number;
@@ -105,9 +125,39 @@ export interface PlatformAdapter {
   readonly capabilities: PlatformCapabilities;
   /** 降级说明（可选，描述有限制的能力） */
   readonly degraded?: PlatformDegradedInfo[];
+  /**
+   * 平台静态支持的语言集合。
+   *
+   * 用作 UI 语言选择与提交链路的兜底来源。注意：这是“平台能提交”的语言集合，
+   * 与“本地工具链能编译运行”的集合是两件事；本地评测应取两者的交集。
+   *
+   * 字符串语义由各 adapter 自行约定，与提交时传入 `submit(id, lang, code)` 的
+   * lang 参数保持一致即可（例如 `cpp` / `c` / `python3` / `java` / `javascript`
+   * / `go` / `rust` / `kotlin` 等）。
+   */
+  readonly supportedLangs: readonly string[];
   login(): Promise<PlatformCredential>;
   listProblems(query: PlatformListQuery): Promise<PlatformProblemSummary[]>;
   getProblem(id: string): Promise<PlatformProblemDetail>;
-  submit(id: string, lang: string, code: string): Promise<PlatformSubmissionId>;
+  /**
+   * 题目级语言能力查询（可选）。
+   *
+   * 已实现的 adapter（如 LeetCode）会返回该题真实支持的语言及初始模板；
+   * 未实现时调用方应回退到 adapter.supportedLangs 作为兜底。
+   */
+  getProblemLangs?(id: string): Promise<ProblemLangInfo[]>;
+  /**
+   * 提交代码。
+   *
+   * @param platformLangId 由调用方通过 getProblemLangs() 预先解析得到的平台原生语言标识。
+   *   提供时 adapter 应直接使用此值（避免内部 LANG_MAP 静默腐烂）；
+   *   未提供时 adapter 回退到自身的静态语言映射作为兼容路径。
+   */
+  submit(
+    id: string,
+    lang: string,
+    code: string,
+    platformLangId?: string,
+  ): Promise<PlatformSubmissionId>;
   pollResult(sid: PlatformSubmissionId): Promise<PlatformJudgeResult>;
 }

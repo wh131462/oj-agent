@@ -16,6 +16,7 @@ export interface ToolInfo {
 
 export interface ToolchainSnapshot {
   gpp: ToolInfo | null;
+  gcc: ToolInfo | null;
   clangpp: ToolInfo | null;
   python3: ToolInfo | null;
   python: ToolInfo | null;
@@ -30,6 +31,7 @@ const TOOL_NAMES: Array<{
   versionFlag: string;
 }> = [
   { key: 'gpp', bin: 'g++', versionFlag: '--version' },
+  { key: 'gcc', bin: 'gcc', versionFlag: '--version' },
   { key: 'clangpp', bin: 'clang++', versionFlag: '--version' },
   { key: 'python3', bin: 'python3', versionFlag: '--version' },
   { key: 'python', bin: 'python', versionFlag: '--version' },
@@ -55,6 +57,7 @@ export class ToolchainProbe {
     }
     const snapshot: ToolchainSnapshot = {
       gpp: null,
+      gcc: null,
       clangpp: null,
       python3: null,
       python: null,

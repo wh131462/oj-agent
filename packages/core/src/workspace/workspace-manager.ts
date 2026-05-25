@@ -18,14 +18,16 @@ import { createHash } from 'node:crypto';
 import type {
   PlatformId,
   PlatformProblemDetail,
+  ProblemLangInfo,
 } from '../platform/adapter.js';
 import { NoopLogger, type LoggerBackend } from '../logger/logger.js';
 import { normalizeSlug } from './slug.js';
 
-export type DefaultLang = 'cpp' | 'python3' | 'java' | 'javascript';
+export type DefaultLang = 'cpp' | 'c' | 'python3' | 'java' | 'javascript';
 
 export const LANG_EXT: Record<DefaultLang, string> = {
   cpp: 'cpp',
+  c: 'c',
   python3: 'py',
   java: 'java',
   javascript: 'js',
@@ -46,6 +48,8 @@ export interface WorkspaceMeta {
   fetchedAt: string;
   updatedAt: string;
   statementHash: string;
+  /** 本地新增的自定义用例编号（cases/in_<n>.txt 的 n），用于在 UI 上区分远端 sample 与用户用例。旧 meta 缺省视为空数组。 */
+  customCaseIndices?: number[];
 }
 
 export interface WriteProblemOptions {
@@ -53,6 +57,13 @@ export interface WriteProblemOptions {
   defaultLang?: DefaultLang;
   /** 远端 updatedAt(ISO 字符串),不传则使用当前时间。 */
   remoteUpdatedAt?: string;
+  /**
+   * 该题语言能力（来自 adapter.getProblemLangs?()）。
+   *
+   * 提供时：写 solution.* 优先使用此处对应 lang 的 codeSnippet。
+   * 不提供时：回退到 detail.codeSnippets（按 langSlug 取），再回退到内置 defaultTemplate。
+   */
+  problemLangs?: readonly ProblemLangInfo[];
 }
 
 export interface WriteProblemResult {
@@ -150,8 +161,9 @@ export class WorkspaceManager {
     const solutionPath = path.join(problemDir, filename);
     const existed = await exists(solutionPath);
     if (!existed) {
-      const snippet = detail.codeSnippets?.[lang === 'javascript' ? 'javascript' : lang];
-      const content = snippet ?? defaultTemplate(lang);
+      const fromProblemLangs = options.problemLangs?.find((p) => p.lang === lang)?.codeSnippet;
+      const fromDetail = detail.codeSnippets?.[lang === 'javascript' ? 'javascript' : lang];
+      const content = fromProblemLangs ?? fromDetail ?? defaultTemplate(lang);
       await writeAtomic(solutionPath, content, this.logger);
     }
 
@@ -219,6 +231,7 @@ export class WorkspaceManager {
       fetchedAt: meta?.fetchedAt ?? now,
       updatedAt: now,
       statementHash: sha256(detail.statement),
+      customCaseIndices: meta?.customCaseIndices,
     };
     await writeAtomic(
       path.join(problemDir, 'meta.json'),
@@ -250,7 +263,7 @@ export class WorkspaceManager {
   /**
    * 追加自定义用例。
    * 编号 = 当前 cases/ 下 in_<n>.txt 的最大 n + 1。
-   * 同时更新 meta.json.samples。
+   * 记录到 meta.customCaseIndices(不污染 meta.samples,后者只反映远端题面 sample)。
    */
   async addCustomCase(
     problemDir: string,
@@ -270,10 +283,12 @@ export class WorkspaceManager {
     if (output !== undefined) {
       await writeAtomic(path.join(casesDir, `out_${next}.txt`), output, this.logger);
     }
-    // 同步 meta.json.samples
+    // 仅在 meta.customCaseIndices 中记录;不动 meta.samples(远端样例)。
     const meta = await this.readMeta(problemDir);
     if (meta) {
-      meta.samples = [...meta.samples, { input, output: output ?? '' }];
+      const indices = meta.customCaseIndices ?? [];
+      if (!indices.includes(next)) indices.push(next);
+      meta.customCaseIndices = indices;
       meta.updatedAt = new Date().toISOString();
       await writeAtomic(
         path.join(problemDir, 'meta.json'),
@@ -282,6 +297,31 @@ export class WorkspaceManager {
       );
     }
     return next;
+  }
+
+  /**
+   * 删除一个自定义用例。仅允许删除 meta.customCaseIndices 中登记的编号。
+   * 同时清理 cases/in_<n>.txt 与 cases/out_<n>.txt。
+   * @returns 实际删除时为 true;若 index 不在自定义列表则返回 false(不做任何操作)。
+   */
+  async removeCustomCase(problemDir: string, index: number): Promise<boolean> {
+    if (!Number.isInteger(index) || index <= 0) return false;
+    const meta = await this.readMeta(problemDir);
+    const indices = meta?.customCaseIndices ?? [];
+    if (!indices.includes(index)) return false;
+    const casesDir = path.join(problemDir, 'cases');
+    await fs.unlink(path.join(casesDir, `in_${index}.txt`)).catch(() => { /* ignore */ });
+    await fs.unlink(path.join(casesDir, `out_${index}.txt`)).catch(() => { /* ignore */ });
+    if (meta) {
+      meta.customCaseIndices = indices.filter((n) => n !== index);
+      meta.updatedAt = new Date().toISOString();
+      await writeAtomic(
+        path.join(problemDir, 'meta.json'),
+        JSON.stringify(meta, null, 2) + '\n',
+        this.logger,
+      );
+    }
+    return true;
   }
 }
 
@@ -335,6 +375,8 @@ function defaultTemplate(lang: DefaultLang): string {
   switch (lang) {
     case 'cpp':
       return '#include <bits/stdc++.h>\nusing namespace std;\n\nint main() {\n    // TODO: 在此处编写代码\n    return 0;\n}\n';
+    case 'c':
+      return '#include <stdio.h>\n\nint main(void) {\n    // TODO: 在此处编写代码\n    return 0;\n}\n';
     case 'python3':
       return '# TODO: 在此处编写代码\n';
     case 'java':

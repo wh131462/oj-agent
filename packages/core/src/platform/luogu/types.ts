@@ -47,6 +47,8 @@ export interface LuoguProblemDetailRaw {
     memory?: number[]; // KB
   };
   translation?: string;
+  /** 该题允许提交的洛谷 lang id 列表（getProblemLangs 使用）。 */
+  acceptLanguages?: number[];
 }
 
 export interface LentilleProblemListContext {

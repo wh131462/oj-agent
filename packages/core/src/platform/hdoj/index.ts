@@ -12,6 +12,7 @@ import type {
   PlatformProblemSummary,
   PlatformSubmissionId,
   PlatformJudgeResult,
+  ProblemLangInfo,
 } from '../adapter.js';
 import type { RegistryDeps } from '../registry.js';
 import {
@@ -29,6 +30,14 @@ const LANG_MAP: Record<string, number> = {
   python3: 11, // Python3
 };
 
+/** UI 展示名（getProblemLangs 用）。 */
+const LANG_DISPLAY: Record<string, string> = {
+  cpp: 'G++',
+  c: 'GCC',
+  java: 'Java',
+  python3: 'Python 3',
+};
+
 export class HDOJAdapter implements PlatformAdapter {
   readonly id = 'hdoj' as const;
   readonly capabilities: PlatformCapabilities = {
@@ -38,6 +47,7 @@ export class HDOJAdapter implements PlatformAdapter {
     pollResult: true,
     autoLogin: false,
   };
+  readonly supportedLangs: readonly string[] = Object.keys(LANG_MAP);
 
   constructor(private readonly deps: RegistryDeps) {}
 
@@ -87,13 +97,24 @@ export class HDOJAdapter implements PlatformAdapter {
     return parseProblemPage(res.text, pid);
   }
 
-  async submit(pid: string, lang: string, code: string): Promise<PlatformSubmissionId> {
+  /**
+   * HDOJ 平台级语言列表对所有题目一致；直接由静态 LANG_MAP 包装返回。
+   */
+  async getProblemLangs(_pid: string): Promise<ProblemLangInfo[]> {
+    return Object.entries(LANG_MAP).map(([lang, id]) => ({
+      lang,
+      displayName: LANG_DISPLAY[lang] ?? lang,
+      platformLangId: String(id),
+    }));
+  }
+
+  async submit(pid: string, lang: string, code: string, platformLangId?: string): Promise<PlatformSubmissionId> {
     const cred = await this.deps.credentialStore.get(this.id);
     if (!cred?.cookie) {
       throw new AdapterError('AUTH_REQUIRED', '请先登录 HDOJ', false);
     }
-    const langId = LANG_MAP[lang];
-    if (langId === undefined) {
+    const langIdRaw = platformLangId ?? (LANG_MAP[lang] !== undefined ? String(LANG_MAP[lang]) : undefined);
+    if (langIdRaw === undefined) {
       throw new AdapterError('LANG_UNSUPPORTED', `HDOJ 不支持语言: ${lang}`, false);
     }
     const username = cred.extra?.username;
@@ -106,7 +127,7 @@ export class HDOJAdapter implements PlatformAdapter {
       formEncoding: 'gbk',
       body: {
         problemid: pid,
-        language: String(langId),
+        language: langIdRaw,
         usercode: code,
         check: '0',
       },

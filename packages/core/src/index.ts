@@ -130,6 +130,7 @@ export type {
   PlatformAdapter,
   PlatformCapabilities,
   PlatformDegradedInfo,
+  ProblemLangInfo,
 } from './platform/adapter.js';
 
 // Platform: errors & registry & adapters

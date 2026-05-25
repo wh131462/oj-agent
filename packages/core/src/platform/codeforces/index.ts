@@ -16,6 +16,7 @@ import type {
   PlatformSubmissionId,
   PlatformJudgeResult,
   PlatformVerdict,
+  ProblemLangInfo,
 } from '../adapter.js';
 import type { RegistryDeps } from '../registry.js';
 import { CodeforcesApi } from './api.js';
@@ -34,6 +35,15 @@ const LANG_MAP: Record<string, number> = {
   javascript: 34, // JavaScript V8
 };
 
+/** UI 展示名（getProblemLangs 用），值与 LANG_MAP 的注释保持一致以便用户分辨编译器版本。 */
+const LANG_DISPLAY: Record<string, string> = {
+  cpp: 'GNU G++17',
+  c: 'GNU GCC C11',
+  java: 'Java 11',
+  python3: 'PyPy 3.7',
+  javascript: 'JavaScript V8',
+};
+
 export class CodeforcesAdapter implements PlatformAdapter {
   readonly id = 'codeforces' as const;
   readonly capabilities: PlatformCapabilities = {
@@ -43,6 +53,7 @@ export class CodeforcesAdapter implements PlatformAdapter {
     pollResult: true,
     autoLogin: false,
   };
+  readonly supportedLangs: readonly string[] = Object.keys(LANG_MAP);
 
   private readonly api: CodeforcesApi;
   /** rating 与 tags 元数据缓存（避免每次 getProblem 都拉一次 problemset） */
@@ -125,10 +136,23 @@ export class CodeforcesAdapter implements PlatformAdapter {
     );
   }
 
+  /**
+   * Codeforces 平台级语言列表对所有题一致；直接由静态 LANG_MAP 包装返回。
+   * 提交时这些 platformLangId 会绕过 LANG_MAP 直传 programTypeId。
+   */
+  async getProblemLangs(_problemId: string): Promise<ProblemLangInfo[]> {
+    return Object.entries(LANG_MAP).map(([lang, id]) => ({
+      lang,
+      displayName: LANG_DISPLAY[lang] ?? lang,
+      platformLangId: String(id),
+    }));
+  }
+
   async submit(
     problemId: string,
     lang: string,
     code: string,
+    platformLangId?: string,
   ): Promise<PlatformSubmissionId> {
     const parsed = parseCfProblemId(problemId);
     if (!parsed) {
@@ -138,8 +162,8 @@ export class CodeforcesAdapter implements PlatformAdapter {
     if (!cred?.cookie) {
       throw new AdapterError('AUTH_REQUIRED', '请先登录 Codeforces', false);
     }
-    const programTypeId = LANG_MAP[lang];
-    if (programTypeId === undefined) {
+    const programTypeIdRaw = platformLangId ?? (LANG_MAP[lang] !== undefined ? String(LANG_MAP[lang]) : undefined);
+    if (programTypeIdRaw === undefined) {
       throw new AdapterError('LANG_UNSUPPORTED', `Codeforces 不支持语言: ${lang}`, false);
     }
 
@@ -158,7 +182,7 @@ export class CodeforcesAdapter implements PlatformAdapter {
       csrf_token: csrf,
       action: 'submitSolutionFormSubmit',
       submittedProblemIndex: parsed.index,
-      programTypeId: String(programTypeId),
+      programTypeId: programTypeIdRaw,
       source: code,
       tabSize: '4',
       sourceFile: '',

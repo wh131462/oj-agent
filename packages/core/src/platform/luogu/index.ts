@@ -19,6 +19,7 @@ import type {
   PlatformSubmissionId,
   PlatformJudgeResult,
   PlatformVerdict,
+  ProblemLangInfo,
 } from '../adapter.js';
 import type { RegistryDeps } from '../registry.js';
 import { LuoguApi } from './api.js';
@@ -42,6 +43,20 @@ const LANG_MAP: Record<string, number> = {
   javascript: 22, // Node.js LTS
 };
 
+/** UI 展示名（getProblemLangs 用），与 LANG_MAP 的 key 对齐。 */
+const LANG_DISPLAY: Record<string, string> = {
+  cpp: 'C++',
+  c: 'C',
+  java: 'Java',
+  python3: 'Python3',
+  javascript: 'JavaScript',
+};
+
+/** 洛谷 lang id -> 我们的 lang key（LANG_MAP 反向）。 */
+const LUOGU_ID_TO_OUR_LANG: Record<number, string> = Object.fromEntries(
+  Object.entries(LANG_MAP).map(([k, v]) => [v, k]),
+);
+
 export class LuoguAdapter implements PlatformAdapter {
   readonly id = 'luogu' as const;
   readonly capabilities: PlatformCapabilities = {
@@ -51,8 +66,11 @@ export class LuoguAdapter implements PlatformAdapter {
     pollResult: true,
     autoLogin: false,
   };
+  readonly supportedLangs: readonly string[] = Object.keys(LANG_MAP);
 
   private readonly api: LuoguApi;
+  /** 题面 raw 缓存：getProblem 写入，getProblemLangs 复用 acceptLanguages。 */
+  private readonly detailRawCache = new Map<string, LuoguProblemDetailRaw>();
 
   constructor(private readonly deps: RegistryDeps) {
     this.api = new LuoguApi(deps.httpClient);
@@ -103,6 +121,7 @@ export class LuoguAdapter implements PlatformAdapter {
     const html = await this.api.fetchProblemDetailHtml(pid);
     const ctx = extractLentilleContext(html);
     const raw = parseDetailContext(ctx);
+    this.detailRawCache.set(raw.pid, raw);
 
     return {
       platform: this.id,
@@ -117,16 +136,47 @@ export class LuoguAdapter implements PlatformAdapter {
     };
   }
 
+  async getProblemLangs(pid: string): Promise<ProblemLangInfo[]> {
+    // 复用 detailRawCache；未命中则触发一次 getProblem 拉详情。
+    let raw = this.detailRawCache.get(pid);
+    if (!raw) {
+      await this.getProblem(pid);
+      raw = this.detailRawCache.get(pid);
+    }
+    const accepted = raw?.acceptLanguages;
+    if (!accepted || accepted.length === 0) return [];
+    const result: ProblemLangInfo[] = [];
+    for (const luoguId of accepted) {
+      const ourLang = LUOGU_ID_TO_OUR_LANG[luoguId];
+      if (!ourLang) continue; // 我们不支持的语言（Pascal/Ruby/Go/Rust 等）跳过
+      result.push({
+        lang: ourLang,
+        displayName: LANG_DISPLAY[ourLang] ?? ourLang,
+        platformLangId: String(luoguId),
+      });
+    }
+    return result;
+  }
+
   async submit(
     pid: string,
     lang: string,
     code: string,
+    platformLangId?: string,
   ): Promise<PlatformSubmissionId> {
     const cred = await this.deps.credentialStore.get(this.id);
     if (!cred?.cookie) {
       throw new AdapterError('AUTH_REQUIRED', '请先登录洛谷', false);
     }
-    const langId = LANG_MAP[lang];
+    // platformLangId 由调用方通过 getProblemLangs 解析得到，此处仅做字符串到 number 的转换；
+    // 缺省时走静态 LANG_MAP 兼容路径。
+    let langId: number | undefined;
+    if (platformLangId !== undefined) {
+      const n = Number(platformLangId);
+      if (Number.isFinite(n)) langId = n;
+    } else {
+      langId = LANG_MAP[lang];
+    }
     if (langId === undefined) {
       throw new AdapterError('LANG_UNSUPPORTED', `洛谷不支持语言: ${lang}`, false);
     }

@@ -83,11 +83,30 @@ export class SubmissionRunner {
 
     const adapter = this.deps.registry.get(input.platform);
 
+    // 解析 platformLangId：若 adapter 实现了 getProblemLangs，则优先使用题目级语言能力
+    // 返回的真实 platformLangId（避免内部静态 LANG_MAP 静默腐烂）。失败一律静默回退。
+    let platformLangId: string | undefined;
+    if (adapter.getProblemLangs) {
+      try {
+        const langs = await adapter.getProblemLangs(input.problemId);
+        platformLangId = langs.find((l) => l.lang === input.lang)?.platformLangId;
+      } catch (e) {
+        this.logger.warn('submission', 'getProblemLangs failed, fallback to static LANG_MAP', {
+          platform: input.platform,
+          error: (e as Error).message,
+        });
+      }
+    }
+
+    if (input.signal?.aborted) {
+      throw new AdapterError('NETWORK_ERROR', 'request aborted', false);
+    }
+
     // 提交
     emit({ stage: 'submitting' });
     let sid: string;
     try {
-      sid = await adapter.submit(input.problemId, input.lang, input.code);
+      sid = await adapter.submit(input.problemId, input.lang, input.code, platformLangId);
     } catch (e) {
       throw wrapError(e);
     }

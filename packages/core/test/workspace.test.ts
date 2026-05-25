@@ -110,7 +110,7 @@ test('WorkspaceManager: 缺模板写注释占位', async () => {
   }
 });
 
-test('WorkspaceManager: addCustomCase 追加编号 + 同步 meta', async () => {
+test('WorkspaceManager: addCustomCase 追加编号 + 记录到 customCaseIndices', async () => {
   const root = await mkTmpDir();
   try {
     const ws = new WorkspaceManager();
@@ -120,8 +120,43 @@ test('WorkspaceManager: addCustomCase 追加编号 + 同步 meta', async () => {
     const in3 = await fs.readFile(path.join(r.problemDir, 'cases', 'in_3.txt'), 'utf-8');
     assert.equal(in3, '5\n');
     const meta = await ws.readMeta(r.problemDir);
-    assert.equal(meta?.samples.length, 3);
-    assert.equal(meta?.samples[2]?.input, '5\n');
+    // 远端 sample 数不变(samples 只反映题面 sample)
+    assert.equal(meta?.samples.length, 2);
+    assert.deepEqual(meta?.customCaseIndices, [3]);
+  } finally {
+    await rmRf(root);
+  }
+});
+
+test('WorkspaceManager: removeCustomCase 删除自定义用例与 meta 记录', async () => {
+  const root = await mkTmpDir();
+  try {
+    const ws = new WorkspaceManager();
+    const r = await ws.writeProblem(sampleDetail(), { rootDir: root, defaultLang: 'cpp' });
+    const n = await ws.addCustomCase(r.problemDir, 'aaa', 'bbb');
+    assert.equal(n, 3);
+    const ok = await ws.removeCustomCase(r.problemDir, 3);
+    assert.equal(ok, true);
+    // 文件被删除
+    await assert.rejects(fs.access(path.join(r.problemDir, 'cases', 'in_3.txt')));
+    await assert.rejects(fs.access(path.join(r.problemDir, 'cases', 'out_3.txt')));
+    const meta = await ws.readMeta(r.problemDir);
+    assert.deepEqual(meta?.customCaseIndices, []);
+  } finally {
+    await rmRf(root);
+  }
+});
+
+test('WorkspaceManager: removeCustomCase 拒绝删除远端 sample 编号', async () => {
+  const root = await mkTmpDir();
+  try {
+    const ws = new WorkspaceManager();
+    const r = await ws.writeProblem(sampleDetail(), { rootDir: root, defaultLang: 'cpp' });
+    // 远端 sample 编号 1, 2,未登记为 customCaseIndices
+    const ok = await ws.removeCustomCase(r.problemDir, 1);
+    assert.equal(ok, false);
+    // 文件仍在
+    await fs.access(path.join(r.problemDir, 'cases', 'in_1.txt'));
   } finally {
     await rmRf(root);
   }

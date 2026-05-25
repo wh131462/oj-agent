@@ -12,6 +12,7 @@ import type { JudgeLang } from '@oj-agent/core';
 
 const LANG_EXT: Record<JudgeLang, string> = {
   cpp: 'cpp',
+  c: 'c',
   python3: 'py',
   java: 'java',
   javascript: 'js',

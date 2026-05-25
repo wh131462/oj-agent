@@ -14,6 +14,7 @@ import type { JudgeLang, PlatformId } from '@oj-agent/core';
 
 const LANG_FILENAME: Record<JudgeLang, string> = {
   cpp: 'solution.cpp',
+  c: 'solution.c',
   python3: 'solution.py',
   java: 'Main.java',
   javascript: 'solution.js',
