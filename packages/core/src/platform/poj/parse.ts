@@ -25,9 +25,9 @@ export async function parseListPage(html: string): Promise<PlatformProblemSummar
   for (const tr of rows) {
     const tds = $(tr).find('td');
     if (tds.length < 3) continue;
-    const idText = $(tds[1]).text().trim();
+    const idText = $(tds[0]).text().trim();
     if (!/^\d+$/.test(idText)) continue;
-    const titleEl = $(tds[2]).find('a');
+    const titleEl = $(tds[1]).find('a');
     const title = titleEl.text().trim();
     if (!title) continue;
     items.push({
