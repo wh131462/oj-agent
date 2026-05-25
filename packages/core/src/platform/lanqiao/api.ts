@@ -19,12 +19,21 @@ function authHeaders(jwt?: string): Record<string, string> {
 export class LanqiaoApi {
   constructor(private readonly httpClient: HttpClient) {}
 
-  async listProblems(query: { limit: number; offset: number }, jwt?: string): Promise<LanqiaoListResponse> {
+  async listProblems(
+    query: { page_size: number; page: number; first_category_id?: number },
+    jwt?: string,
+  ): Promise<LanqiaoListResponse> {
     const res = await this.httpClient.request(
       withSession('lanqiao', {
-        url: `${BASE}/api/v2/problems/`,
+        url: `${BASE}/api/v2/problems/pc/`,
         method: 'GET',
-        query,
+        query: {
+          page_size: String(query.page_size),
+          page: String(query.page),
+          ...(query.first_category_id !== undefined
+            ? { first_category_id: String(query.first_category_id) }
+            : {}),
+        },
         headers: authHeaders(jwt),
       }),
     );

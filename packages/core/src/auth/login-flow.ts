@@ -79,10 +79,12 @@ export class LoginFlow {
       status = 'unknown' as const;
     }
 
-    if (status === 'valid') {
+    // valid: 校验通过；unknown: 平台暂无校验逻辑或网络问题，信任浏览器登录信号
+    if (status === 'valid' || status === 'unknown') {
       this.logger.info('auth', 'browser-auto-login succeeded', {
         platform: config.platform,
         username: captured.username,
+        credStatus: status,
       });
       return {
         ok: true,
@@ -99,10 +101,7 @@ export class LoginFlow {
     return {
       ok: false,
       reason: 'auth-invalid',
-      message:
-        status === 'expired'
-          ? 'cookie 校验未通过(已过期或无效)'
-          : '凭证校验返回 unknown,可能是网络或平台问题',
+      message: 'cookie 校验未通过(已过期或无效)',
     };
   }
 

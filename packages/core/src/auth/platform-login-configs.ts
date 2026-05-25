@@ -37,8 +37,10 @@ const HDOJ: LoginConfig = {
   platform: 'hdoj',
   loginUrl: 'http://acm.hdu.edu.cn/userloginex.php',
   ready: {
-    urlPattern: /control_panel\.php/,
-    cookieName: 'PHPSESSID',
+    // HDOJ 给所有访客都设置 PHPSESSID（哪怕未登录），不能作为登录信号。
+    // 登录成功后页面会带 action=login 参数（POST 回调），或跳到首页 / control_panel.php。
+    // 注意：登录页本身是 userloginex.php（无参数），不会误触发。
+    urlPattern: /^http:\/\/acm\.hdu\.edu\.cn\/(?:$|index\.php|control_panel\.php|status\.php|userstatistics\.php|userloginex\.php\?action=login)/,
   },
   cookieDomain: '.hdu.edu.cn',
   timeoutMs: 300_000,
@@ -59,8 +61,8 @@ const CODEFORCES: LoginConfig = {
   platform: 'codeforces',
   loginUrl: 'https://codeforces.com/enter',
   ready: {
+    // JSESSIONID 在未登录时也会下发；用 URL 跳转作为登录信号
     urlPattern: /^https:\/\/codeforces\.com\/(?:$|problemset|contest|profile)/,
-    cookieName: 'JSESSIONID',
   },
   cookieDomain: '.codeforces.com',
   timeoutMs: 300_000,
@@ -82,8 +84,8 @@ const LUOGU: LoginConfig = {
   platform: 'luogu',
   loginUrl: 'https://www.luogu.com.cn/auth/login',
   ready: {
+    // __client_id 是设备级 cookie，未登录也存在；仅靠 URL 跳转判断登录
     urlPattern: /^https:\/\/www\.luogu\.com\.cn\/(?:$|problem|user|contest)/,
-    cookieName: '__client_id',
   },
   cookieDomain: '.luogu.com.cn',
   timeoutMs: 300_000,
@@ -124,21 +126,33 @@ const POJ: LoginConfig = {
 
 const LANQIAO: LoginConfig = {
   platform: 'lanqiao',
-  // 蓝桥云课 SSO 通过 passport.lanqiao.cn 完成,成功后跳回主站
+  // 蓝桥云课 SSO 通过 passport.lanqiao.cn 完成,成功后跳回主站或停留在 profile 页
   loginUrl: 'https://passport.lanqiao.cn/login',
   ready: {
-    urlPattern: /^https:\/\/www\.lanqiao\.cn\/(?:$|courses|problems|user)/,
-    cookieName: 'Authorization',
+    // 登录成功后可能跳转到 www.lanqiao.cn 或停留在 passport.lanqiao.cn/profile
+    urlPattern: /^https:\/\/(www|passport)\.lanqiao\.cn\/(profile)?/,
   },
   cookieDomain: '.lanqiao.cn',
   timeoutMs: 300_000,
   async extractUsername(page: BrowserPageHandle): Promise<string | null> {
     try {
+      // 尝试从页面提取用户信息
       return await page.evaluate<string | null>(() => {
-        const el = document.querySelector('a[href*="/user/"]') as HTMLAnchorElement | null;
-        if (!el) return null;
-        const m = el.getAttribute('href')?.match(/\/user\/(\d+)/);
-        return m ? m[1]! : null;
+        // 尝试从用户菜单或链接提取
+        const userLink = document.querySelector('a[href*="/user/"]') as HTMLAnchorElement | null;
+        if (userLink) {
+          const m = userLink.getAttribute('href')?.match(/\/user\/(\d+)/);
+          if (m) return m[1]!;
+        }
+        // 尝试从 localStorage 提取
+        try {
+          const userInfo = localStorage.getItem('userInfo');
+          if (userInfo) {
+            const parsed = JSON.parse(userInfo);
+            return parsed.id || parsed.username || null;
+          }
+        } catch {}
+        return null;
       });
     } catch {
       return null;

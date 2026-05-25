@@ -89,6 +89,16 @@ export class PlaywrightBrowserLogin implements BrowserLoginCapture {
           // 忽略,用户名可后续手动补
         }
       }
+      // 蓝桥云课：登录成功后停留在 passport.lanqiao.cn/profile，需要主动访问 www.lanqiao.cn
+      // 以触发主站 cookie（lqtoken 等）的写入
+      if (config.platform === 'lanqiao') {
+        try {
+          await page.goto('https://www.lanqiao.cn/', { waitUntil: 'domcontentloaded', timeout: 10_000 });
+          await page.waitForTimeout(1000);
+        } catch {
+          // ignore
+        }
+      }
 
       const cookies = await context.cookies();
       const filtered = filterCookies(cookies, config.cookieDomain);

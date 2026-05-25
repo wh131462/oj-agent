@@ -24,6 +24,7 @@ export class CredentialChecker {
     try {
       if (platform === 'leetcode-cn') return await this.checkLeetCodeCn();
       if (platform === 'hdoj') return await this.checkHdoj();
+      if (platform === 'lanqiao') return await this.checkLanqiao();
       return 'unknown';
     } catch {
       return 'unknown';
@@ -62,10 +63,30 @@ export class CredentialChecker {
       responseEncoding: 'gbk',
       timeoutMs: 8000,
     });
-    // 已登录页含 "Sign Out" / 中文 "注销" 字样
-    if (/Sign\s*Out|退出|注销/i.test(res.text)) return 'valid';
-    // 未登录被跳转或返回登录表单
-    if (/userloginex\.php|Sign\s*In|登录/i.test(res.text)) return 'expired';
+    // 已登录：页面包含退出链接或欢迎词
+    if (/userlogout\.php|Sign\s*[Oo]ut|退出|注销|Logout/i.test(res.text)) return 'valid';
+    // 注意：fetch 默认跟随 302，未登录时会跟到登录页。
+    // 但登录页也含 "登录" 中文字样，若匹配 expired 则凭证会被清除。
+    // 保守策略：凡是无法确认 valid 的情况均返回 unknown，交由 login-flow 信任浏览器登录信号。
+    return 'unknown';
+  }
+
+  private async checkLanqiao(): Promise<CredentialStatus> {
+    // 蓝桥云课使用 JWT 认证，通常存储在 cookie 中
+    // injectCookieFor 会自动注入所有 .lanqiao.cn 域下的 cookie（包括 Authorization 等）
+    const res = await this.http.request({
+      url: 'https://www.lanqiao.cn/api/v2/user/basic/',
+      method: 'GET',
+      injectCookieFor: 'lanqiao',
+      timeoutMs: 8000,
+    });
+    if (res.status === 401 || res.status === 403) return 'expired';
+    if (res.status === 200) {
+      try {
+        const data = res.json<{ id?: number | string; username?: string }>();
+        if (data && (data.id || data.username)) return 'valid';
+      } catch {}
+    }
     return 'unknown';
   }
 }

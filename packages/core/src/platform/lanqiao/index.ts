@@ -82,8 +82,8 @@ export class LanqiaoAdapter implements PlatformAdapter {
     const cred = await this.deps.credentialStore.get(this.id);
     const jwt = cred?.token ?? cred?.extra?.token;
 
-    const data = await this.api.listProblems({ limit: pageSize, offset }, jwt);
-    let items: PlatformProblemSummary[] = (data.results ?? []).map((p) => ({
+    const data = await this.api.listProblems({ page_size: pageSize, page }, jwt);
+    let items: PlatformProblemSummary[] = (data.data ?? []).map((p) => ({
       platform: this.id,
       id: String(p.id),
       title: p.name ?? p.title ?? `蓝桥 #${p.id}`,
@@ -194,7 +194,13 @@ export class LanqiaoAdapter implements PlatformAdapter {
   /** 取 JWT；缺失立即抛 AUTH_REQUIRED。 */
   private async requireJwt(action: string): Promise<string> {
     const cred = await this.deps.credentialStore.get(this.id);
-    const jwt = cred?.token ?? cred?.extra?.token;
+    // JWT 可能存储在 token、extra.token 或 cookie 中的 lqtoken
+    let jwt = cred?.token ?? cred?.extra?.token;
+    if (!jwt && cred?.cookie) {
+      // 从 cookie 中提取 lqtoken
+      const m = cred.cookie.match(/(?:^|;\s*)lqtoken=([^;]+)/);
+      if (m) jwt = m[1];
+    }
     if (!jwt) {
       throw new AdapterError(
         'AUTH_REQUIRED',

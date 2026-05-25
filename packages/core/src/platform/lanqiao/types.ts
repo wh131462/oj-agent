@@ -8,17 +8,20 @@ export interface LanqiaoListItem {
   name?: string;
   /** 保留 title 兼容字段（部分接口或历史 fixture 可能使用） */
   title?: string;
-  /** 列表里的 difficulty 是考分（如 30），用于显示分值；难度等级用 difficulty_level（1-4） */
+  /** 列表里的 difficulty 是考分（如 30），用于显示分值；难度等级用 difficulty_level（1-13） */
   difficulty?: number;
   difficulty_level?: number;
   tags?: string[];
+  type?: string;
+  first_category_id?: number;
+  second_category_id?: number | null;
 }
 
 export interface LanqiaoListResponse {
   count: number;
-  next?: string | null;
-  previous?: string | null;
-  results: LanqiaoListItem[];
+  page: number;
+  page_size: number;
+  data: LanqiaoListItem[];
 }
 
 export interface LanqiaoProblemDetailRaw {
