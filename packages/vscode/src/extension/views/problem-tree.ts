@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import { promises as fs } from 'node:fs';
+import * as path from 'node:path';
 import type {
   PlatformId,
   PlatformAdapterRegistry,
@@ -9,17 +11,21 @@ import type {
   CredentialStore,
 } from '@oj-agent/core';
 import type { VSCodeConfigBackend } from '../backends/vscode-config.js';
-import { getEnabledPlatforms } from '../oj-services.js';
+import { getEnabledPlatforms, resolveWorkspaceRoot } from '../oj-services.js';
+import { findProblemDir } from '../utils/workspace-resolver.js';
 
 export type ProblemTreeNode =
   | { kind: 'platform'; platform: PlatformId }
   | { kind: 'control'; platform: PlatformId; control: ControlKind }
   | { kind: 'problem'; platform: PlatformId; summary: PlatformProblemSummary }
   | { kind: 'action'; platform: PlatformId; summary: PlatformProblemSummary; action: ProblemAction }
+  | { kind: 'fileGroup'; platform: PlatformId; summary: PlatformProblemSummary; group: FileGroupKind; dir: string }
+  | { kind: 'file'; platform: PlatformId; summary: PlatformProblemSummary; filePath: string; label: string; description?: string; caseIndex?: number; isCustomCase?: boolean }
   | { kind: 'empty'; platform: PlatformId; reason: 'loading' | 'no-data' | 'not-logged-in' | 'error'; message?: string };
 
 type ProblemAction = 'pull' | 'openProblem' | 'openCode' | 'runTest' | 'submit';
 type ControlKind = 'search' | 'difficulty' | 'tags' | 'pager' | 'prevPage' | 'nextPage' | 'reset';
+type FileGroupKind = 'solution' | 'cases';
 
 interface PlatformState {
   query: PlatformListQuery;
@@ -64,6 +70,14 @@ export class ProblemTreeDataProvider implements vscode.TreeDataProvider<ProblemT
 
   refresh(): void {
     for (const s of this.states.values()) s.cache = undefined;
+    this.emitter.fire(undefined);
+  }
+
+  /**
+   * 仅刷新本地文件相关子节点（解题代码/测试用例分组），不清空平台列表 cache。
+   * 用于 FileSystemWatcher 事件 —— 避免每次文件变动都重新拉取远端列表。
+   */
+  refreshLocalFiles(): void {
     this.emitter.fire(undefined);
   }
 
@@ -165,6 +179,33 @@ export class ProblemTreeDataProvider implements vscode.TreeDataProvider<ProblemT
       return item;
     }
 
+    if (node.kind === 'fileGroup') {
+      const isSolution = node.group === 'solution';
+      const item = new vscode.TreeItem(
+        isSolution ? '解题代码' : '测试用例',
+        vscode.TreeItemCollapsibleState.Collapsed,
+      );
+      item.iconPath = new vscode.ThemeIcon(isSolution ? 'file-code' : 'beaker');
+      item.contextValue = `problem-fileGroup-${node.group}`;
+      item.tooltip = node.dir;
+      return item;
+    }
+
+    if (node.kind === 'file') {
+      const item = new vscode.TreeItem(node.label, vscode.TreeItemCollapsibleState.None);
+      item.iconPath = new vscode.ThemeIcon(node.isCustomCase ? 'edit' : 'file');
+      if (node.description) item.description = node.description;
+      item.tooltip = node.filePath;
+      item.contextValue = node.isCustomCase ? 'problem-file-custom' : 'problem-file';
+      item.resourceUri = vscode.Uri.file(node.filePath);
+      item.command = {
+        command: 'vscode.open',
+        title: '打开',
+        arguments: [vscode.Uri.file(node.filePath), { viewColumn: vscode.ViewColumn.One }],
+      };
+      return item;
+    }
+
     // empty
     let label: string;
     switch (node.reason) {
@@ -175,7 +216,7 @@ export class ProblemTreeDataProvider implements vscode.TreeDataProvider<ProblemT
         label = '未登录 · 点击右键登录';
         break;
       case 'no-data':
-        label = '(暂无数据)';
+        label = node.message ?? '(暂无数据)';
         break;
       case 'error':
         label = `加载失败: ${node.message ?? ''}`;
@@ -237,16 +278,109 @@ export class ProblemTreeDataProvider implements vscode.TreeDataProvider<ProblemT
     }
 
     if (node.kind === 'problem') {
-      // 展开 5 个 action 子节点
-      return PROBLEM_ACTIONS.map((action): ProblemTreeNode => ({
+      const actionNodes: ProblemTreeNode[] = PROBLEM_ACTIONS.map((action): ProblemTreeNode => ({
         kind: 'action',
         platform: node.platform,
         summary: node.summary,
         action,
       }));
+      const ref = {
+        platform: node.platform,
+        id: node.summary.id,
+        slug: extractSlug(node.summary.url),
+      };
+      const dir = await findProblemDir(resolveWorkspaceRoot(this.configBackend), ref);
+      if (!dir) return actionNodes;
+      return [
+        ...actionNodes,
+        { kind: 'fileGroup', platform: node.platform, summary: node.summary, group: 'solution', dir },
+        { kind: 'fileGroup', platform: node.platform, summary: node.summary, group: 'cases', dir },
+      ];
+    }
+
+    if (node.kind === 'fileGroup') {
+      return this.getFileGroupChildren(node);
     }
 
     return [];
+  }
+
+  private async getFileGroupChildren(
+    node: Extract<ProblemTreeNode, { kind: 'fileGroup' }>,
+  ): Promise<ProblemTreeNode[]> {
+    if (node.group === 'solution') {
+      const files = await fs.readdir(node.dir).catch(() => [] as string[]);
+      const target = files.find((f) => f === 'Main.java')
+        ?? files.find((f) => /^solution\.[a-z]+$/i.test(f));
+      if (!target) {
+        return [{ kind: 'empty', platform: node.platform, reason: 'no-data', message: '暂无源文件' }];
+      }
+      return [{
+        kind: 'file',
+        platform: node.platform,
+        summary: node.summary,
+        filePath: path.join(node.dir, target),
+        label: target,
+      }];
+    }
+    // cases
+    const casesDir = path.join(node.dir, 'cases');
+    const entries = await fs.readdir(casesDir).catch(() => [] as string[]);
+    const customIndices = await readCustomCaseIndices(node.dir);
+    const indexSet = new Set<number>();
+    const inMap = new Map<number, string>();
+    const outMap = new Map<number, string>();
+    for (const f of entries) {
+      const mi = f.match(/^in_(\d+)\.txt$/);
+      if (mi) {
+        const n = Number(mi[1]);
+        indexSet.add(n);
+        inMap.set(n, f);
+        continue;
+      }
+      const mo = f.match(/^out_(\d+)\.txt$/);
+      if (mo) {
+        const n = Number(mo[1]);
+        indexSet.add(n);
+        outMap.set(n, f);
+      }
+    }
+    if (indexSet.size === 0) {
+      return [{ kind: 'empty', platform: node.platform, reason: 'no-data', message: '暂无用例' }];
+    }
+    const sorted = [...indexSet].sort((a, b) => a - b);
+    const children: ProblemTreeNode[] = [];
+    for (const n of sorted) {
+      const isCustom = customIndices.has(n);
+      const labelSuffix = isCustom ? ' · 自定义' : '';
+      const inName = inMap.get(n);
+      if (inName) {
+        children.push({
+          kind: 'file',
+          platform: node.platform,
+          summary: node.summary,
+          filePath: path.join(casesDir, inName),
+          label: `#${n} 输入${labelSuffix}`,
+          description: inName,
+          caseIndex: n,
+          isCustomCase: isCustom,
+        });
+      }
+      const outName = outMap.get(n);
+      if (outName) {
+        children.push({
+          kind: 'file',
+          platform: node.platform,
+          summary: node.summary,
+          filePath: path.join(casesDir, outName),
+          label: `#${n} 输出${labelSuffix}`,
+          description: outName,
+          caseIndex: n,
+          isCustomCase: isCustom,
+        });
+      }
+    }
+    return children;
   }
 
   private buildControlNodes(platform: PlatformId, _s: PlatformState): ProblemTreeNode[] {
@@ -469,4 +603,19 @@ function extractSlug(url?: string): string | undefined {
   if (!url) return undefined;
   const m = url.match(/\/problems\/([^/?#]+)/);
   return m?.[1];
+}
+
+async function readCustomCaseIndices(problemDir: string): Promise<Set<number>> {
+  try {
+    const raw = await fs.readFile(path.join(problemDir, 'meta.json'), 'utf-8');
+    const meta = JSON.parse(raw) as { customCaseIndices?: unknown };
+    const arr = Array.isArray(meta.customCaseIndices) ? meta.customCaseIndices : [];
+    const set = new Set<number>();
+    for (const v of arr) {
+      if (typeof v === 'number' && Number.isInteger(v)) set.add(v);
+    }
+    return set;
+  } catch {
+    return new Set();
+  }
 }
