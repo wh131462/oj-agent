@@ -53,7 +53,6 @@ export function renderJudgeHtml(input: RenderJudgeHtmlInput): string {
     const acCount = result.cases.filter((c) => c.verdict === 'AC').length;
     const totalTime = result.cases.reduce((sum, c) => sum + (c.timeMs ?? 0), 0);
     const allAC = acCount === total && total > 0;
-    const pct = total > 0 ? Math.round((acCount / total) * 100) : 0;
 
     body = `
       <div class="summary-row">
@@ -62,9 +61,6 @@ export function renderJudgeHtml(input: RenderJudgeHtmlInput): string {
         <span class="summary-time">${totalTime}ms</span>
         <div class="summary-spacer"></div>
         <button class="btn-ghost" data-cmd="judge.runAll">重跑全部</button>
-      </div>
-      <div class="progress-bar">
-        <div class="progress-fill ${allAC ? 'fill-ac' : 'fill-wa'}" style="width:${pct}%"></div>
       </div>
       <div class="cases">
         ${result.cases.map((c) => renderCase(c, problemRef, aiEnabled)).join('\n')}
@@ -75,117 +71,100 @@ export function renderJudgeHtml(input: RenderJudgeHtmlInput): string {
 <meta charset="utf-8" />
 <meta http-equiv="Content-Security-Policy" content="${csp}">
 <style nonce="${nonce}">
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   :root {
-    --c-ac: #4ade80;
-    --c-wa: #f87171;
+    --fg: var(--vscode-foreground);
+    --fg-muted: var(--vscode-descriptionForeground);
+    --bg: var(--vscode-editor-background);
+    --bg-soft: var(--vscode-textBlockQuote-background, rgba(128,128,128,0.06));
+    --bg-hover: var(--vscode-list-hoverBackground, rgba(128,128,128,0.08));
+    --border: var(--vscode-widget-border, rgba(128,128,128,0.18));
+    --focus: var(--vscode-focusBorder);
+    --c-ac:  #4ade80;
+    --c-wa:  #f87171;
     --c-tle: #fbbf24;
-    --c-re: #c084fc;
-    --c-border: var(--vscode-widget-border, rgba(128,128,128,0.2));
-    --c-surface: var(--vscode-editorWidget-background);
-    --c-text: var(--vscode-foreground);
-    --c-muted: var(--vscode-descriptionForeground);
-    --c-primary: var(--vscode-button-background, #0e639c);
-    --c-primary-fg: var(--vscode-button-foreground, #fff);
+    --c-re:  #c084fc;
     --mono: var(--vscode-editor-font-family), 'Consolas', monospace;
   }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
-    font-family: var(--mono);
-    color: var(--c-text);
-    background: var(--vscode-editor-background);
-    padding: 12px 14px;
+    font-family: var(--vscode-font-family);
+    color: var(--fg);
+    background: var(--bg);
+    padding: 28px 32px 48px;
     max-width: 860px;
     margin: 0 auto;
     font-size: 13px;
-    line-height: 1.5;
+    line-height: 1.6;
   }
 
-  /* header */
-  .page-header {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid var(--c-border);
-    margin-bottom: 14px;
+  /* Page Header */
+  .page-header { margin-bottom: 18px; }
+  .page-header h1 {
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: -0.3px;
+    margin-bottom: 6px;
   }
-  .header-title { font-size: 13px; font-weight: 600; }
-  .header-meta { font-size: 11px; color: var(--c-muted); }
+  .page-header p { font-size: 12px; color: var(--fg-muted); }
 
   /* state empty / running */
   .state-empty {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 28px 0;
-    color: var(--c-muted);
+    gap: 12px;
+    padding: 24px 0;
+    color: var(--fg-muted);
     font-size: 13px;
   }
   .spinner {
     width: 14px; height: 14px; flex-shrink: 0;
-    border: 2px solid rgba(128,128,128,0.2);
-    border-top-color: var(--c-muted);
+    border: 2px solid var(--border);
+    border-top-color: var(--fg-muted);
     border-radius: 50%;
     animation: spin 0.7s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  /* summary row */
+  /* summary */
   .summary-row {
     display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 6px;
+    align-items: baseline;
+    gap: 12px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 8px;
   }
   .summary-verdict {
-    font-size: 12px;
+    font-size: 16px;
     font-weight: 700;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.04em;
   }
+  .summary-stat { font-size: 13px; }
+  .summary-time { font-size: 12px; color: var(--fg-muted); }
+  .summary-spacer { flex: 1; }
   .verdict-ac { color: var(--c-ac); }
   .verdict-wa { color: var(--c-wa); }
-  .summary-stat { font-size: 13px; font-weight: 500; }
-  .summary-time { font-size: 12px; color: var(--c-muted); }
-  .summary-spacer { flex: 1; }
 
-  /* progress */
-  .progress-bar {
-    height: 2px;
-    background: rgba(128,128,128,0.12);
-    margin-bottom: 12px;
-  }
-  .progress-fill { height: 100%; transition: width 0.3s ease; }
-  .fill-ac { background: var(--c-ac); }
-  .fill-wa { background: var(--c-wa); }
-
-  /* cases */
-  .cases { display: flex; flex-direction: column; gap: 4px; }
-  .case-card {
-    border: 1px solid var(--c-border);
-    border-radius: 4px;
-    overflow: hidden;
-  }
-  .case-card.verdict-ac { border-left-color: var(--c-ac); }
-  .case-card.verdict-wa,
-  .case-card.verdict-re,
-  .case-card.verdict-ce { border-left-color: var(--c-wa); }
-  .case-card.verdict-tle { border-left-color: var(--c-tle); }
+  /* cases — flat row list, not cards */
+  .cases { display: flex; flex-direction: column; }
+  .case-card { border-bottom: 1px solid var(--border); }
+  .case-card:last-child { border-bottom: none; }
 
   .case-head {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 7px 10px;
+    gap: 12px;
+    padding: 10px 0;
     cursor: pointer;
     user-select: none;
   }
-  .case-head:hover { background: rgba(128,128,128,0.05); }
+  .case-head:hover .case-num { color: var(--fg); }
 
   .verdict-tag {
     font-size: 11px;
     font-weight: 700;
-    letter-spacing: 0.03em;
-    min-width: 28px;
+    letter-spacing: 0.06em;
+    min-width: 32px;
   }
   .verdict-tag.AC { color: var(--c-ac); }
   .verdict-tag.WA { color: var(--c-wa); }
@@ -193,104 +172,97 @@ export function renderJudgeHtml(input: RenderJudgeHtmlInput): string {
   .verdict-tag.RE { color: var(--c-re); }
   .verdict-tag.CE { color: var(--c-wa); }
 
-  .case-num { font-size: 12px; color: var(--c-muted); }
-  .case-time { font-size: 11px; color: var(--c-muted); margin-left: 2px; }
-  .case-actions { margin-left: auto; display: flex; gap: 4px; align-items: center; }
+  .case-num { font-size: 13px; font-weight: 500; }
+  .case-time { font-size: 11px; color: var(--fg-muted); }
+  .case-actions { margin-left: auto; display: flex; gap: 2px; align-items: center; }
   .chevron {
     width: 12px; height: 12px;
-    color: var(--c-muted);
+    color: var(--fg-muted);
     transition: transform 0.15s;
     flex-shrink: 0;
   }
   .case-card.open .chevron { transform: rotate(90deg); }
 
   .case-body {
-    border-top: 1px solid var(--c-border);
-    padding: 10px;
+    padding: 4px 0 16px 44px;
     display: none;
   }
   .case-card.open .case-body { display: block; }
 
-  .io-block { margin-bottom: 8px; }
-  .io-block:last-child { margin-bottom: 0; }
+  .io-block + .io-block { margin-top: 10px; }
   .io-label {
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 600;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
-    color: var(--c-muted);
-    margin-bottom: 3px;
+    color: var(--fg-muted);
+    margin-bottom: 4px;
   }
   pre {
-    background: rgba(0,0,0,0.15);
-    border: 1px solid var(--c-border);
+    background: var(--bg-soft);
+    border: 1px solid var(--border);
     padding: 8px 10px;
     border-radius: 3px;
     font-family: var(--mono);
     font-size: 12px;
+    line-height: 1.5;
     overflow-x: auto;
     white-space: pre-wrap;
     word-break: break-all;
     margin: 0;
   }
-  .diff-add { color: var(--c-ac); }
-  .diff-del { color: var(--c-wa); }
+  pre em { font-style: normal; }
+  .diff-add { color: var(--c-ac); background: rgba(74,222,128,0.08); display: block; }
+  .diff-del { color: var(--c-wa); background: rgba(248,113,113,0.08); display: block; }
 
   /* compile error */
-  .compile-error { }
   .section-label {
     font-size: 11px;
     font-weight: 600;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
-    margin-bottom: 6px;
+    color: var(--fg-muted);
+    margin-bottom: 8px;
   }
   .error-label { color: var(--c-wa); }
   .output-block { width: 100%; }
-  .error-actions { margin-top: 8px; }
+  .error-actions { margin-top: 10px; }
 
-  /* buttons */
-  .btn-primary {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    background: var(--c-primary);
-    color: var(--c-primary-fg);
-    border: none;
-    padding: 6px 14px;
-    border-radius: 3px;
+  /* buttons (aligned with settings) */
+  button {
     cursor: pointer;
+    font-family: inherit;
     font-size: 12px;
-    font-weight: 500;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--fg);
+    padding: 4px 10px;
+    border-radius: 3px;
+    transition: background 0.12s;
   }
-  .btn-primary:hover { opacity: 0.9; }
+  button:hover:not(:disabled) { background: var(--bg-hover); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .btn-primary {
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    padding: 6px 16px;
+    font-weight: 500;
+    border-color: transparent;
+  }
+  .btn-primary:hover:not(:disabled) { background: var(--vscode-button-hoverBackground); }
 
   .btn-ghost {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    background: transparent;
-    color: var(--c-muted);
-    border: 1px solid var(--c-border);
-    padding: 4px 9px;
-    border-radius: 3px;
-    cursor: pointer;
-    font-size: 12px;
-    font-family: var(--mono);
+    color: var(--fg-muted);
+    border-color: var(--border);
   }
-  .btn-ghost:hover { color: var(--c-text); border-color: rgba(128,128,128,0.4); }
+  .btn-ghost:hover:not(:disabled) { color: var(--fg); border-color: var(--focus); }
 
   .btn-text {
-    background: transparent;
-    border: none;
-    padding: 0;
-    cursor: pointer;
-    font-size: 12px;
-    font-family: var(--mono);
-    color: var(--c-muted);
+    padding: 4px 6px;
+    color: var(--fg-muted);
   }
-  .btn-text:hover { color: var(--c-text); }
-
+  .btn-text:hover:not(:disabled) { color: var(--fg); }
   .ai-btn { color: var(--c-re); }
   .ai-btn:hover { color: #d8b4fe; }
 
@@ -298,8 +270,8 @@ export function renderJudgeHtml(input: RenderJudgeHtmlInput): string {
 </style></head><body>
 
 <div class="page-header">
-  <span class="header-title">本地测试</span>
-  <span class="header-meta">${escapeHtml(platformLabel)} · ${escapeHtml(problemRef.id)}${problemRef.slug ? ` · ${escapeHtml(problemRef.slug)}` : ''}</span>
+  <h1>本地测试</h1>
+  <p>${escapeHtml(platformLabel)} · ${escapeHtml(problemRef.id)}${problemRef.slug ? ` · ${escapeHtml(problemRef.slug)}` : ''}</p>
 </div>
 
 ${body}
@@ -437,6 +409,6 @@ function renderDiff(unified: string): string {
   }).join('\n');
 }
 
-function extractInput(_c: JudgeCaseResult): string {
-  return '';
+function extractInput(c: JudgeCaseResult): string {
+  return c.input ?? '';
 }
