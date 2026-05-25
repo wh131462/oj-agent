@@ -53,7 +53,7 @@ export class AIPanel {
   private constructor(private readonly ctx: vscode.ExtensionContext, private readonly services: AIServices) {
     this.panel = vscode.window.createWebviewPanel(
       'ojAgent.aiPanel',
-      'OJ-Agent · AI 助手',
+      'OJ-Agent:AI 助手',
       vscode.ViewColumn.Beside,
       {
         enableScripts: true,
@@ -570,7 +570,7 @@ ${getMarkdownStyleBlock()}
     </button>
   </div>
   <div class="composer-hint">
-    <span id="hintLeft">Enter 发送 · Shift+Enter 换行</span>
+    <span id="hintLeft">Enter 发送 / Shift+Enter 换行</span>
     <span id="hintRight"></span>
   </div>
 </div>

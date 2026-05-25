@@ -75,7 +75,7 @@ export class SettingsPanel {
   ) {
     this.panel = vscode.window.createWebviewPanel(
       'ojAgent.settings',
-      'OJ-Agent · 设置',
+      'OJ-Agent:设置',
       vscode.ViewColumn.Active,
       { enableScripts: true, retainContextWhenHidden: true },
     );
