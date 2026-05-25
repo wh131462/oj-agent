@@ -12,26 +12,71 @@ const EXT_TO_LANG: Record<string, JudgeLang> = {
   cpp: 'cpp',
   cc: 'cpp',
   cxx: 'cpp',
+  c: 'c',
   py: 'python3',
   java: 'java',
   js: 'javascript',
   mjs: 'javascript',
 };
 
-/** 扫 problemDir 推断语言:优先 solution.<ext> / Main.java,失败回退 ui.defaultLang。 */
-export async function inferLangFromDir(dir: string, defaultLang: JudgeLang): Promise<JudgeLang> {
+/**
+ * 扫 problemDir 推断当前语言。
+ *
+ * 优先级：
+ *   1. preferLang（调用方明确指定，如 webview 顶部当前选中的语言）—— 若该 lang 对应文件存在则采纳
+ *   2. 目录里 mtime 最新的 solution.* / Main.java —— 反映用户最近在编辑的语言
+ *   3. defaultLang —— 最终兜底
+ *
+ * 旧实现按目录返回顺序简单循环，恰好让字母序更靠前的 Main.java 抢占第一，
+ * 导致用户切换语言后判题始终走 java。
+ */
+export async function inferLangFromDir(
+  dir: string,
+  defaultLang: JudgeLang,
+  preferLang?: JudgeLang,
+): Promise<JudgeLang> {
   const files = await fs.readdir(dir).catch(() => [] as string[]);
+
+  // 步骤 1：调用方明确指定的 lang 优先（文件存在才采纳）
+  if (preferLang) {
+    const want = preferLang === 'java' ? 'Main.java' : `solution.${LANG_TO_EXT[preferLang]}`;
+    if (files.includes(want)) return preferLang;
+  }
+
+  // 步骤 2：按 mtime 倒序找最近编辑过的 solution.* / Main.java
+  const candidates: Array<{ file: string; lang: JudgeLang; mtimeMs: number }> = [];
   for (const f of files) {
-    if (f === 'Main.java') return 'java';
-    const m = f.match(/^solution\.([a-z]+)$/i);
-    if (m) {
-      const ext = m[1]!.toLowerCase();
-      const l = EXT_TO_LANG[ext];
-      if (l) return l;
+    let lang: JudgeLang | undefined;
+    if (f === 'Main.java') lang = 'java';
+    else {
+      const m = f.match(/^solution\.([a-z]+)$/i);
+      if (m) lang = EXT_TO_LANG[m[1]!.toLowerCase()];
+    }
+    if (!lang) continue;
+    try {
+      const st = await fs.stat(path.join(dir, f));
+      candidates.push({ file: f, lang, mtimeMs: st.mtimeMs });
+    } catch {
+      // ignore: stat 失败则该文件不参与
     }
   }
+  if (candidates.length > 0) {
+    candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
+    return candidates[0]!.lang;
+  }
+
+  // 步骤 3：什么都没有，回退到 defaultLang
   return defaultLang;
 }
+
+/** EXT_TO_LANG 的反向映射，供 preferLang 路径快速取文件名。 */
+const LANG_TO_EXT: Record<JudgeLang, string> = {
+  cpp: 'cpp',
+  c: 'c',
+  python3: 'py',
+  java: 'java',
+  javascript: 'js',
+};
 
 /** 解析当前激活的 problemRef:优先从活跃编辑器路径推断,失败时弹窗让用户选。 */
 async function resolveActiveRef(services: OJServices): Promise<{ ref: ProblemRef; dir: string } | undefined> {
@@ -97,7 +142,7 @@ export function registerJudgeCommands(deps: JudgeCommandDeps): vscode.Disposable
   const timeoutMs = () => services.configBackend.get<number>('judge.timeoutMs') ?? 3000;
   const defaultLang = () => (services.configBackend.get<JudgeLang>('ui.defaultLang') ?? 'cpp');
 
-  async function runAll(refIn?: ProblemRef): Promise<void> {
+  async function runAll(refIn?: ProblemRef & { _preferLang?: JudgeLang }): Promise<void> {
     let target: { ref: ProblemRef; dir: string } | undefined;
     if (refIn) {
       const root = resolveWorkspaceRoot(services.configBackend);
@@ -111,7 +156,7 @@ export function registerJudgeCommands(deps: JudgeCommandDeps): vscode.Disposable
       target = await resolveActiveRef(services);
     }
     if (!target) return;
-    const lang = await inferLangFromDir(target.dir, defaultLang());
+    const lang = await inferLangFromDir(target.dir, defaultLang(), refIn?._preferLang);
     panel.show(target.ref);
     panel.setRunning(target.ref);
     try {
@@ -131,7 +176,7 @@ export function registerJudgeCommands(deps: JudgeCommandDeps): vscode.Disposable
     }
   }
 
-  async function runCase(args?: { platform?: string; id?: string; slug?: string; caseIndex?: number }): Promise<void> {
+  async function runCase(args?: { platform?: string; id?: string; slug?: string; caseIndex?: number; _preferLang?: JudgeLang }): Promise<void> {
     let refIn: ProblemRef | undefined;
     if (args && args.platform && args.id) {
       refIn = { platform: args.platform as ProblemRef['platform'], id: args.id, slug: args.slug };
@@ -145,7 +190,7 @@ export function registerJudgeCommands(deps: JudgeCommandDeps): vscode.Disposable
       : Promise.resolve(await resolveActiveRef(services));
     const t = await target;
     if (!t) return;
-    const lang = await inferLangFromDir(t.dir, defaultLang());
+    const lang = await inferLangFromDir(t.dir, defaultLang(), args?._preferLang);
     const allCases = await loadCases(t.dir);
     let chosen = allCases;
     if (typeof args?.caseIndex === 'number') {

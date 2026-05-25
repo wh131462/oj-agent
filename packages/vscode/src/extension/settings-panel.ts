@@ -39,6 +39,7 @@ const PLATFORM_LABELS: Record<PlatformId, string> = {
 
 const LANG_OPTIONS: Array<{ value: JudgeLang; label: string }> = [
   { value: 'cpp', label: 'C++' },
+  { value: 'c', label: 'C' },
   { value: 'python3', label: 'Python 3' },
   { value: 'java', label: 'Java' },
   { value: 'javascript', label: 'JavaScript' },
@@ -121,16 +122,26 @@ export class SettingsPanel {
 
   private async refreshPlatforms(): Promise<void> {
     const platforms = getEnabledPlatforms(this.oj.configBackend);
-    const rows: PlatformAccountRow[] = [];
-    for (const platform of platforms) {
-      const cred = await this.oj.credentialStore.get(platform).catch(() => undefined);
-      rows.push({
-        platform,
-        label: PLATFORM_LABELS[platform] ?? platform,
-        loggedIn: !!cred,
-        username: cred?.extra?.username,
-      });
-    }
+    const rows = await Promise.all(
+      platforms.map(async (platform): Promise<PlatformAccountRow> => {
+        const cred = await this.oj.credentialStore.get(platform).catch(() => undefined);
+        let status: import('@oj-agent/core').CredentialStatus = 'unknown';
+        try {
+          status = await this.oj.credentialChecker.check(platform);
+        } catch {
+          status = 'unknown';
+        }
+        // 与 problem-tree 保持一致：仅当本地存在凭证且校验未明确 expired 时视为已登录。
+        // unknown 状态下若本地有凭证 → 已登录（无服务端校验的平台走这条路径）。
+        const loggedIn = !!cred && status !== 'expired';
+        return {
+          platform,
+          label: PLATFORM_LABELS[platform] ?? platform,
+          loggedIn,
+          username: loggedIn ? cred?.extra?.username : undefined,
+        };
+      }),
+    );
     this.post({ kind: 'platforms', rows });
   }
 

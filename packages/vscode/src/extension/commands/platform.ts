@@ -7,7 +7,9 @@ import { resolveWorkspaceRoot } from '../oj-services.js';
 import type { ProblemRef } from '../utils/problem-ref.js';
 import { parseProblemUrl } from '../utils/problem-ref.js';
 import { findProblemDir, inferRefFromDir } from '../utils/workspace-resolver.js';
+import { pickOpenColumn } from '../utils/view-column.js';
 import type { ProblemWebviewManager } from '../views/problem-webview.js';
+import { inferLangFromDir } from './judge.js';
 
 export interface PlatformCommandDeps {
   services: OJServices;
@@ -24,7 +26,16 @@ async function pullAndOpen(deps: PlatformCommandDeps, ref: ProblemRef): Promise<
     { location: vscode.ProgressLocation.Notification, title: `拉取 ${ref.platform} ${ref.id}...` },
     async () => {
       const detail = await adapter.getProblem(ref.slug ?? ref.id);
-      await services.workspaceManager.writeProblem(detail, { rootDir: root, defaultLang });
+      // 优先用 adapter.getProblemLangs 获取该题真实支持的语言与初始模板;失败静默回退。
+      let problemLangs;
+      if (adapter.getProblemLangs) {
+        try {
+          problemLangs = await adapter.getProblemLangs(ref.slug ?? ref.id);
+        } catch {
+          // ignore，writeProblem 会回退到 detail.codeSnippets / defaultTemplate
+        }
+      }
+      await services.workspaceManager.writeProblem(detail, { rootDir: root, defaultLang, problemLangs });
     },
   );
   await problemWebview.open(ref);
@@ -136,13 +147,35 @@ export function registerPlatformCommands(deps: PlatformCommandDeps): vscode.Disp
         return;
       }
       const files = await fs.readdir(dir).catch(() => [] as string[]);
-      const target = files.find((f) => f === 'Main.java' || /^solution\.[a-z]+$/i.test(f));
+      // 优先按"最近编辑的语言"打开（inferLangFromDir 已用 mtime 排序消除 Main.java 抢占）；
+      // 推断结果不存在或目录里没有对应文件时，再按目录扫描兜底。
+      const defaultLang = services.configBackend.get<JudgeLang>('ui.defaultLang') ?? 'cpp';
+      const inferredLang = await inferLangFromDir(dir, defaultLang);
+      const want = solutionFilenameForLang(inferredLang);
+      let target: string | undefined = files.includes(want) ? want : undefined;
+      if (!target) {
+        target = files.find((f) => /^solution\.[a-z]+$/i.test(f) || f === 'Main.java');
+      }
       if (!target) {
         void vscode.window.showWarningMessage('未找到 solution.* 或 Main.java');
         return;
       }
       const doc = await vscode.workspace.openTextDocument(path.join(dir, target));
-      await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
+      await vscode.window.showTextDocument(doc, pickOpenColumn());
+    }),
+
+    vscode.commands.registerCommand('ojAgent.platform.revealProblemDir', async (arg?: ProblemRef) => {
+      if (!arg || !arg.platform || !arg.id) {
+        void vscode.window.showWarningMessage('缺少题目信息');
+        return;
+      }
+      const root = resolveWorkspaceRoot(services.configBackend);
+      const dir = await findProblemDir(root, arg);
+      if (!dir) {
+        void vscode.window.showWarningMessage('题目尚未拉取到本地');
+        return;
+      }
+      await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(dir));
     }),
 
     vscode.commands.registerCommand('ojAgent.platform.copyProblemId', async (arg?: unknown) => {
@@ -211,4 +244,15 @@ function extractSlugFromUrl(url?: string): string | undefined {
   if (!url) return undefined;
   const m = url.match(/\/problems\/([^/?#]+)/);
   return m?.[1];
+}
+
+/** lang → 该 lang 对应的 solution 文件名（与 extension.ts 中同名函数行为一致）。 */
+function solutionFilenameForLang(lang: JudgeLang): string {
+  switch (lang) {
+    case 'cpp': return 'solution.cpp';
+    case 'c': return 'solution.c';
+    case 'python3': return 'solution.py';
+    case 'java': return 'Main.java';
+    case 'javascript': return 'solution.js';
+  }
 }

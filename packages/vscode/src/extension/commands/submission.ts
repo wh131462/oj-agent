@@ -25,7 +25,7 @@ export interface SubmissionCommandDeps {
 async function readSolutionCode(dir: string, lang: JudgeLang): Promise<string | undefined> {
   const candidates: string[] = lang === 'java'
     ? ['Main.java']
-    : [`solution.${lang === 'cpp' ? 'cpp' : lang === 'python3' ? 'py' : lang === 'javascript' ? 'js' : 'cpp'}`];
+    : [`solution.${lang === 'cpp' ? 'cpp' : lang === 'c' ? 'c' : lang === 'python3' ? 'py' : lang === 'javascript' ? 'js' : 'cpp'}`];
   for (const f of candidates) {
     try {
       return await fs.readFile(path.join(dir, f), 'utf-8');
@@ -39,7 +39,7 @@ async function readSolutionCode(dir: string, lang: JudgeLang): Promise<string | 
 export function registerSubmissionCommands(deps: SubmissionCommandDeps): vscode.Disposable[] {
   const { services, statusBar, judgePanel, rememberLatest, getLatest } = deps;
 
-  async function submit(refArg?: ProblemRef): Promise<void> {
+  async function submit(refArg?: ProblemRef & { _preferLang?: JudgeLang }): Promise<void> {
     let ref = refArg;
     if (!ref) {
       const ed = vscode.window.activeTextEditor;
@@ -56,7 +56,7 @@ export function registerSubmissionCommands(deps: SubmissionCommandDeps): vscode.
       return;
     }
     const defaultLang = services.configBackend.get<JudgeLang>('ui.defaultLang') ?? 'cpp';
-    const lang = await inferLangFromDir(dir, defaultLang);
+    const lang = await inferLangFromDir(dir, defaultLang, refArg?._preferLang);
     const code = await readSolutionCode(dir, lang);
     if (!code || code.trim().length === 0) {
       void vscode.window.showWarningMessage('题解文件为空,无法提交');
@@ -107,7 +107,7 @@ export function registerSubmissionCommands(deps: SubmissionCommandDeps): vscode.
   }
 
   return [
-    vscode.commands.registerCommand('ojAgent.submission.submit', (arg?: ProblemRef) => submit(arg)),
+    vscode.commands.registerCommand('ojAgent.submission.submit', (arg?: ProblemRef & { _preferLang?: JudgeLang }) => submit(arg)),
 
     vscode.commands.registerCommand('ojAgent.submission.openLatest', () => {
       const ref = getLatest();

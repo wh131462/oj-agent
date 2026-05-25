@@ -16,10 +16,30 @@ export interface ProblemWebviewDeps {
   resolveProblemDir: (ref: ProblemRef) => Promise<string | undefined>;
   /** 推断题目目录当前的源代码语言。 */
   resolveCurrentLang: (ref: ProblemRef) => Promise<JudgeLang>;
+  /**
+   * 解析该题真实可选语言列表（基于 adapter.getProblemLangs?）。
+   *
+   * 返回结构：
+   * - undefined：adapter 未实现或调用失败，webview 回退到内置 4 种语言菜单
+   * - { langs: [...], unsupportedReason? }：langs 为过滤到 JudgeLang 子集后的真实可选列表；
+   *   若过滤后为空数组且 unsupportedReason 非空，菜单顶部会展示该原因文本
+   */
+  resolveAvailableLangs?: (
+    ref: ProblemRef,
+  ) => Promise<
+    | undefined
+    | {
+        langs: ReadonlyArray<{ lang: JudgeLang; displayName: string }>;
+        unsupportedReason?: string;
+      }
+  >;
   /** 切换/创建语言对应的源文件。 */
   onLanguageChange: (ref: ProblemRef, lang: JudgeLang) => Promise<void>;
-  /** 命令路由:webview 发回的 { type:'cmd', cmd, args } 透传给 'ojAgent.' + cmd 。 */
-  onCommand: (cmd: string, args: unknown) => void;
+  /**
+   * 命令路由：webview 发回的 { type:'cmd', cmd, args, lang? } 透传给 'ojAgent.' + cmd。
+   * 第三个 lang 参数表示发起命令时 webview 顶部选中的语言，调用方按需使用（如 openCode）。
+   */
+  onCommand: (cmd: string, args: unknown, lang?: JudgeLang) => void;
   /** AI 入口:四个已有命令的统一入口。 */
   onAIAction: (kind: 'explainError' | 'generateApproach' | 'generateSolution' | 'explainCode', ref: ProblemRef) => void;
 }
@@ -111,6 +131,19 @@ export class ProblemWebviewManager {
     }
     const bodyHtml = await renderMarkdown(markdownSrc);
     const currentLang = await this.deps.resolveCurrentLang(ref);
+    let availableLangs;
+    let unsupportedReason;
+    if (this.deps.resolveAvailableLangs) {
+      try {
+        const r = await this.deps.resolveAvailableLangs(ref);
+        if (r) {
+          availableLangs = r.langs;
+          unsupportedReason = r.unsupportedReason;
+        }
+      } catch {
+        // 失败静默：webview 内 renderLangButtons 会回退到 4 种内置语言
+      }
+    }
     const html = renderProblemHtml({
       problemRef: ref,
       meta,
@@ -119,6 +152,8 @@ export class ProblemWebviewManager {
       extensionUri: this.deps.extensionUri,
       aiEnabled: this.deps.isAIEnabled(),
       currentLang,
+      availableLangs,
+      unsupportedReason,
       nonce: genNonce(),
     });
     panel.webview.html = html;
@@ -128,11 +163,16 @@ export class ProblemWebviewManager {
     if (!msg || typeof msg !== 'object') return;
     const m = msg as { type?: string; cmd?: string; kind?: string; lang?: string; args?: unknown };
     if (m.type === 'cmd' && typeof m.cmd === 'string') {
-      this.deps.onCommand(m.cmd, m.args ?? ref);
+      // 校验 lang 在 JudgeLang 集合内；非法值忽略，等同未携带
+      const valid: JudgeLang[] = ['cpp', 'c', 'python3', 'java', 'javascript'];
+      const lang = typeof m.lang === 'string' && valid.includes(m.lang as JudgeLang)
+        ? (m.lang as JudgeLang)
+        : undefined;
+      this.deps.onCommand(m.cmd, m.args ?? ref, lang);
       return;
     }
     if (m.type === 'lang' && typeof m.lang === 'string') {
-      const valid: JudgeLang[] = ['cpp', 'python3', 'java', 'javascript'];
+      const valid: JudgeLang[] = ['cpp', 'c', 'python3', 'java', 'javascript'];
       if (valid.includes(m.lang as JudgeLang)) {
         void this.deps.onLanguageChange(ref, m.lang as JudgeLang);
       }

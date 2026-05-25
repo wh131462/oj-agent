@@ -61,5 +61,9 @@ export class ProblemContextProvider {
 }
 
 function langExt(lang: JudgeLang): string {
-  return lang === 'cpp' ? 'cpp' : lang === 'python3' ? 'py' : lang === 'javascript' ? 'js' : 'cpp';
+  return lang === 'cpp' ? 'cpp'
+    : lang === 'c' ? 'c'
+    : lang === 'python3' ? 'py'
+    : lang === 'javascript' ? 'js'
+    : 'cpp';
 }

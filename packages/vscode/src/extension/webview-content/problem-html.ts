@@ -17,6 +17,16 @@ export interface RenderProblemHtmlInput {
   extensionUri: vscode.Uri;
   aiEnabled: boolean;
   currentLang: JudgeLang;
+  /**
+   * 该题真实可选语言列表（来自 adapter.getProblemLangs?）。
+   *
+   * - 未提供（adapter 未实现 getProblemLangs 或调用失败）：渲染兜底的 4 种语言菜单
+   * - 提供且非空：仅渲染列表内的语言；若 currentLang 不在列表内，仍保留高亮但提示不支持
+   * - 提供且为空：表示该题平台支持的语言全部不在本地 JudgeLang 子集内；菜单只剩 currentLang，应配合 unsupportedReason 提示
+   */
+  availableLangs?: ReadonlyArray<{ lang: JudgeLang; displayName: string }>;
+  /** 当 availableLangs 为空数组时，向用户解释“为什么菜单这么少”。例如：“该题平台仅支持 mysql/oracle 等数据库语言（本地工具链暂不支持）”。 */
+  unsupportedReason?: string;
   nonce: string;
 }
 
@@ -31,13 +41,14 @@ const PLATFORM_LABELS: Record<string, string> = {
 
 const LANG_LABELS: Record<JudgeLang, string> = {
   cpp: 'C++',
+  c: 'C',
   python3: 'Python 3',
   java: 'Java',
   javascript: 'JavaScript',
 };
 
 export function renderProblemHtml(input: RenderProblemHtmlInput): string {
-  const { problemRef, meta, bodyHtml, webview, extensionUri, aiEnabled, currentLang, nonce } = input;
+  const { problemRef, meta, bodyHtml, webview, extensionUri, aiEnabled, currentLang, availableLangs, unsupportedReason, nonce } = input;
   const assetUris = getMarkdownAssetUris(webview, extensionUri);
   const cspSource = webview.cspSource;
   const csp = [
@@ -233,6 +244,15 @@ ${getMarkdownStyleBlock()}
   }
   .menu .panel button:disabled { opacity: 0.4; cursor: not-allowed; }
   .menu .panel button.selected { background: var(--oj-hover); }
+  .menu .panel .lang-hint {
+    padding: 6px 12px;
+    font-size: 11px;
+    color: var(--vscode-descriptionForeground, var(--oj-fg-muted));
+    border-bottom: 1px solid var(--oj-border);
+    white-space: normal;
+    line-height: 1.4;
+    max-width: 260px;
+  }
 
   /* ── Content ── 共享 .markdown-body 样式来自 markdown.ts，这里仅做题面字号微调 ── */
   #content.markdown-body {
@@ -267,6 +287,9 @@ ${getMarkdownStyleBlock()}
     <button class="btn icon-only" data-cmd="platform.openCode" title="打开代码">
       <svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 5L2.5 8l3 3M10.5 5l3 3-3 3M9.5 4l-3 8"/></svg>
     </button>
+    <button class="btn icon-only" data-cmd="platform.revealProblemDir" title="在资源管理器中显示题目目录">
+      <svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 4.5h4l1.5 1.5h7v7.5h-12.5z"/><path d="M1.5 4.5v9"/></svg>
+    </button>
     <button class="btn icon-only" data-cmd="platform.refreshProblem" title="刷新题目">
       <svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8a5.5 5.5 0 0 1 9.4-3.9M13.5 8a5.5 5.5 0 0 1-9.4 3.9"/><path d="M12 1.5v3h-3M4 14.5v-3h3"/></svg>
     </button>
@@ -280,10 +303,8 @@ ${getMarkdownStyleBlock()}
         <svg class="chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"/></svg>
       </button>
       <div class="panel">
-        <button data-lang="cpp"${currentLang === 'cpp' ? ' class="selected"' : ''}>C++</button>
-        <button data-lang="python3"${currentLang === 'python3' ? ' class="selected"' : ''}>Python 3</button>
-        <button data-lang="java"${currentLang === 'java' ? ' class="selected"' : ''}>Java</button>
-        <button data-lang="javascript"${currentLang === 'javascript' ? ' class="selected"' : ''}>JavaScript</button>
+        ${unsupportedReason ? `<div class="lang-hint">${escapeHtml(unsupportedReason)}</div>` : ''}
+        ${renderLangButtons(currentLang, availableLangs)}
       </div>
     </div>
     <div class="menu" id="aiMenu">
@@ -310,7 +331,10 @@ ${getMarkdownStyleBlock()}
 
   document.querySelectorAll('button[data-cmd]').forEach((b) => {
     b.addEventListener('click', () => {
-      vscode.postMessage({ type: 'cmd', cmd: b.getAttribute('data-cmd'), args: ref });
+      // 当前选中的语言（与顶部菜单同步）。后端命令路由可据此精准定位 solution.* 文件。
+      const selected = document.querySelector('button[data-lang].selected');
+      const lang = selected ? selected.getAttribute('data-lang') : null;
+      vscode.postMessage({ type: 'cmd', cmd: b.getAttribute('data-cmd'), args: ref, lang });
     });
   });
 
@@ -369,4 +393,39 @@ ${getMarkdownStyleBlock()}
     if (m && m.type === 'aiAvailableChanged') setAiEnabled(m.enabled);
   });
 </script></body></html>`;
+}
+
+/**
+ * 渲染语言菜单按钮列表。
+ *
+ * - availableLangs 为 undefined：adapter 未实现 getProblemLangs 或调用失败 → fallback 到 4 种内置默认语言
+ * - availableLangs 为非空数组：仅渲染列表内语言（按入参顺序）
+ * - availableLangs 为空数组：表示该题不被本地任何 JudgeLang 支持，菜单只显示 currentLang 兜底
+ *
+ * 任何情况下都保证 currentLang 在菜单内（避免用户看不到当前高亮状态）。
+ */
+function renderLangButtons(
+  currentLang: JudgeLang,
+  availableLangs: ReadonlyArray<{ lang: JudgeLang; displayName: string }> | undefined,
+): string {
+  const fallback: Array<{ lang: JudgeLang; displayName: string }> = [
+    { lang: 'cpp', displayName: 'C++' },
+    { lang: 'c', displayName: 'C' },
+    { lang: 'python3', displayName: 'Python 3' },
+    { lang: 'java', displayName: 'Java' },
+    { lang: 'javascript', displayName: 'JavaScript' },
+  ];
+  // undefined → fallback 4+种；空数组 → 不 fallback（语义是“本地真没语言可用”）
+  let list: Array<{ lang: JudgeLang; displayName: string }> =
+    availableLangs === undefined ? fallback : [...availableLangs];
+  // 保证 currentLang 始终在菜单里
+  if (!list.some((l) => l.lang === currentLang)) {
+    list = [{ lang: currentLang, displayName: LANG_LABELS[currentLang] }, ...list];
+  }
+  return list
+    .map(
+      (l) =>
+        `<button data-lang="${escapeHtml(l.lang)}"${l.lang === currentLang ? ' class="selected"' : ''}>${escapeHtml(l.displayName)}</button>`,
+    )
+    .join('\n        ');
 }
