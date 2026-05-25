@@ -63,6 +63,12 @@
         "icon": "$(comment-discussion)"
       },
       {
+        "command": "ojAgent.ai.newConversation",
+        "title": "OJ-Agent: AI 新建对话",
+        "category": "OJ-Agent: AI",
+        "icon": "$(add)"
+      },
+      {
         "command": "ojAgent.ai.addProfile",
         "title": "OJ-Agent: 新建 AI Profile",
         "category": "OJ-Agent",

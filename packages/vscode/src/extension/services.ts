@@ -1,5 +1,18 @@
 import * as vscode from 'vscode';
 import { ProfileStore, ApiKeyVault, RateLimiter, AIRunner } from '@oj-agent/core';
+import { ConversationStore } from './services/conversation-store.js';
+
+export type {
+  ChatMessage,
+  Conversation,
+  ConversationSummary,
+} from './services/conversation-store.js';
+export { ConversationStore } from './services/conversation-store.js';
+
+export interface ProfileSummary {
+  id: string;
+  label: string;
+}
 
 const CFG_NS = 'ojAgent';
 const CFG_NS_AI = 'ojAgent.ai';
@@ -33,6 +46,7 @@ export interface AIServices {
   vault: ApiKeyVault;
   runner: AIRunner;
   limiter: RateLimiter;
+  conversations: ConversationStore;
 }
 
 export function buildAIServices(ctx: vscode.ExtensionContext): AIServices {
@@ -43,7 +57,8 @@ export function buildAIServices(ctx: vscode.ExtensionContext): AIServices {
     return typeof v === 'number' && v > 0 ? v : 20;
   });
   const runner = new AIRunner(limiter);
-  return { profiles, vault, runner, limiter };
+  const conversations = new ConversationStore(ctx.globalState);
+  return { profiles, vault, runner, limiter, conversations };
 }
 
 export function isRedactEnabled(): boolean {

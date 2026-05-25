@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import type { AIServices } from './services.js';
+import type { AIServices, Conversation, ConversationSummary, ProfileSummary } from './services.js';
 import { isRedactEnabled } from './services.js';
 import { buildContext, RateLimitError, type AIContextInput } from '@oj-agent/core';
 import {
@@ -9,46 +9,73 @@ import {
   getMarkdownStyleBlock,
 } from './webview-content/markdown.js';
 
-interface ChatMessage {
-  role: 'user' | 'assistant';
-  content: string;
-}
-
 type WebviewMsgIn =
   | { kind: 'send'; text: string }
   | { kind: 'stop' }
   | { kind: 'clear' }
-  | { kind: 'openSettings' };
+  | { kind: 'openSettings' }
+  | { kind: 'newConversation' }
+  | { kind: 'switchConversation'; id: string }
+  | { kind: 'renameConversation'; id: string; title: string }
+  | { kind: 'deleteConversation'; id: string }
+  | { kind: 'setActiveProfile'; id: string };
+
+interface RenderedMessage {
+  role: 'user' | 'assistant';
+  html: string;
+}
 
 type WebviewMsgOut =
-  | { kind: 'init'; profile: string | null; redact: boolean; topic?: string; history: Array<{ role: 'user' | 'assistant'; html: string }>; initialPrompt?: string }
-  | { kind: 'userMsg'; html: string }
-  | { kind: 'assistantStart' }
-  | { kind: 'assistantHtml'; html: string }
-  | { kind: 'assistantDone'; html: string }
-  | { kind: 'cleared' }
-  | { kind: 'error'; message: string; httpStatus?: number; rateLimit?: number }
-  | { kind: 'state'; profile: string | null; redact: boolean };
+  | {
+      kind: 'init';
+      profile: string | null;
+      redact: boolean;
+      profiles: ProfileSummary[];
+      activeProfileId: string;
+      conversations: ConversationSummary[];
+      currentId: string;
+      topic: string;
+      title: string;
+      history: RenderedMessage[];
+    }
+  | { kind: 'userMsg'; conversationId: string; html: string }
+  | { kind: 'assistantStart'; conversationId: string }
+  | { kind: 'assistantHtml'; conversationId: string; html: string }
+  | { kind: 'assistantDone'; conversationId: string; html: string }
+  | { kind: 'cleared'; conversationId: string }
+  | { kind: 'error'; conversationId: string; message: string; httpStatus?: number; rateLimit?: number }
+  | {
+      kind: 'conversationsUpdated';
+      conversations: ConversationSummary[];
+      currentId: string;
+    }
+  | {
+      kind: 'profilesUpdated';
+      profiles: ProfileSummary[];
+      activeProfileId: string;
+      profileLabel: string | null;
+      redact: boolean;
+    };
 
-/** 流式渲染节流间隔（ms）—— 防止每个 chunk 都重新跑一次 markdown-it */
+const DEFAULT_SYSTEM_PROMPT = '你是一名资深算法竞赛教练。回答简洁、分点、用中文。代码块使用对应语言的高亮 fenced block。支持用户多轮追问，结合上下文给出准确解答。';
 const STREAM_RENDER_INTERVAL_MS = 80;
+
+interface StreamingState {
+  conversationId: string;
+  accumulated: string;
+  abort: AbortController;
+  renderTimer: ReturnType<typeof setTimeout> | null;
+}
 
 export class AIPanel {
   private static current?: AIPanel;
   private panel: vscode.WebviewPanel;
-  private abortCtl: AbortController | null = null;
   private disposables: vscode.Disposable[] = [];
 
-  /** 对话历史（不含 system prompt） */
-  private history: ChatMessage[] = [];
-  /** 当前会话的系统提示词（从首次 prepare 时构造，后续追问保持一致） */
-  private systemPrompt = '';
-  /** 当前话题（题目标题），用于面板 title */
-  private topic = '';
-  /** 当前正在累积的 assistant 消息（流式拼接） */
-  private streaming = '';
-  /** 节流计时器：防止每个 chunk 都跑 markdown-it */
-  private renderTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 当前正在查看的会话 id（webview 主视图） */
+  private currentId: string | null = null;
+  /** 所有进行中的流式任务，按 conversationId 索引 */
+  private streams = new Map<string, StreamingState>();
 
   private constructor(private readonly ctx: vscode.ExtensionContext, private readonly services: AIServices) {
     this.panel = vscode.window.createWebviewPanel(
@@ -64,6 +91,17 @@ export class AIPanel {
     this.panel.webview.html = this.html();
     this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
     this.panel.webview.onDidReceiveMessage((m: WebviewMsgIn) => this.onMessage(m), null, this.disposables);
+
+    // ConversationStore 变更时刷新 webview 侧栏（保持轻量：仅推 summaries）
+    this.disposables.push(
+      services.conversations.onChange(() => {
+        this.postOut({
+          kind: 'conversationsUpdated',
+          conversations: services.conversations.list(),
+          currentId: this.currentId ?? '',
+        });
+      }),
+    );
   }
 
   static showWith(ctx: vscode.ExtensionContext, services: AIServices, input: AIContextInput): AIPanel | undefined {
@@ -97,104 +135,215 @@ export class AIPanel {
     return AIPanel.current;
   }
 
+  static openNew(ctx: vscode.ExtensionContext, services: AIServices): AIPanel | undefined {
+    const active = services.profiles.getActive();
+    if (!active) {
+      void vscode.window
+        .showWarningMessage('请先在设置中添加 AI 模型 Profile', '打开设置')
+        .then((pick) => {
+          if (pick === '打开设置') void vscode.commands.executeCommand('ojAgent.ai.openSettings');
+        });
+      return undefined;
+    }
+    if (!AIPanel.current) {
+      AIPanel.current = new AIPanel(ctx, services);
+    } else {
+      AIPanel.current.panel.reveal(vscode.ViewColumn.Beside);
+    }
+    void AIPanel.current.createAndShowNew();
+    return AIPanel.current;
+  }
+
+  /** 全局 Profile 切换或脱敏配置变化时刷新 webview */
   static refreshState(services: AIServices): void {
     if (!AIPanel.current) return;
     const active = services.profiles.getActive();
     AIPanel.current.postOut({
-      kind: 'state',
-      profile: active?.label ?? null,
+      kind: 'profilesUpdated',
+      profiles: AIPanel.current.collectProfiles(),
+      activeProfileId: active?.id ?? '',
+      profileLabel: active?.label ?? null,
       redact: isRedactEnabled(),
     });
   }
 
-  /** 从题面工具栏触发：根据 action 构造首条 user 消息，并立即开始流式回答 */
+  // ─── private: 会话准备 ──────────────────────────────
+
+  private collectProfiles(): ProfileSummary[] {
+    return this.services.profiles.list().map((p) => ({ id: p.id, label: p.label }));
+  }
+
+  /** 从题面工具栏触发：构造首条 user 消息，新建会话并发起请求 */
   private async prepare(input: AIContextInput): Promise<void> {
     const { system, user } = buildContext(input);
     const topic = input.problem?.title ?? '';
-    this.topic = topic;
-    if (topic) this.panel.title = `${topic}`;
-
-    // 新会话：重置历史与系统提示词
-    this.systemPrompt = system;
-    this.history = [];
-    this.streaming = '';
+    if (topic) this.panel.title = topic;
 
     const active = this.services.profiles.getActive();
-    this.postOut({
-      kind: 'init',
-      profile: active?.label ?? null,
-      redact: isRedactEnabled(),
+    const conv = this.services.conversations.create({
+      title: topic || '新对话',
       topic,
-      history: [],
-      initialPrompt: user,
+      systemPrompt: system,
+      profileId: active?.id ?? '',
     });
-
-    // 自动发送首条问题
+    this.currentId = conv.id;
+    await this.pushInit(conv);
     await this.sendUser(user);
   }
 
-  /** 通过命令面板打开：空状态对话 */
+  /** 通过命令面板/openPanel 打开：取最近会话或新建一个空会话 */
   private async prepareEmpty(): Promise<void> {
-    const active = this.services.profiles.getActive();
-    if (!this.systemPrompt) {
-      this.systemPrompt = '你是一名资深算法竞赛教练。回答简洁、分点、用中文。代码块使用对应语言的高亮 fenced block。支持用户多轮追问，结合上下文给出准确解答。';
+    const latest = this.services.conversations.latest();
+    if (latest) {
+      this.currentId = latest.id;
+      if (latest.topic) this.panel.title = latest.topic;
+      await this.pushInit(latest);
+    } else {
+      await this.createAndShowNew();
     }
-    const renderedHistory = await Promise.all(
-      this.history.map(async (h) => ({ role: h.role, html: await renderMarkdown(h.content) })),
+  }
+
+  private async createAndShowNew(): Promise<void> {
+    const active = this.services.profiles.getActive();
+    const conv = this.services.conversations.create({
+      title: '新对话',
+      topic: '',
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      profileId: active?.id ?? '',
+    });
+    this.currentId = conv.id;
+    this.panel.title = 'OJ-Agent:AI 助手';
+    await this.pushInit(conv);
+  }
+
+  private async pushInit(conv: Conversation): Promise<void> {
+    const renderedHistory: RenderedMessage[] = await Promise.all(
+      conv.messages.map(async (m) => ({ role: m.role, html: await renderMarkdown(m.content) })),
     );
+    const active = this.services.profiles.getActive();
     this.postOut({
       kind: 'init',
       profile: active?.label ?? null,
       redact: isRedactEnabled(),
-      topic: this.topic,
+      profiles: this.collectProfiles(),
+      activeProfileId: active?.id ?? '',
+      conversations: this.services.conversations.list(),
+      currentId: conv.id,
+      topic: conv.topic,
+      title: conv.title,
       history: renderedHistory,
     });
+    // 若该会话仍在后台流式生成，把累积内容补渲染一次，让 UI 恢复 streaming 状态
+    const live = this.streams.get(conv.id);
+    if (live) {
+      this.postOut({ kind: 'assistantStart', conversationId: conv.id });
+      if (live.accumulated) {
+        const html = await renderMarkdown(live.accumulated);
+        this.postOut({ kind: 'assistantHtml', conversationId: conv.id, html });
+      }
+    }
   }
 
+  // ─── private: webview 消息处理 ──────────────────────
+
   private async onMessage(m: WebviewMsgIn): Promise<void> {
-    if (m.kind === 'stop') {
-      this.abortCtl?.abort();
-      return;
-    }
-    if (m.kind === 'openSettings') {
-      void vscode.commands.executeCommand('ojAgent.ai.openSettings');
-      return;
-    }
-    if (m.kind === 'clear') {
-      const confirm = await vscode.window.showWarningMessage(
-        '确认清空当前对话？',
-        { modal: true },
-        '清空',
-      );
-      if (confirm !== '清空') return;
-      this.history = [];
-      this.streaming = '';
-      this.abortCtl?.abort();
-      this.postOut({ kind: 'cleared' });
-      return;
-    }
-    if (m.kind === 'send') {
-      await this.sendUser(m.text);
+    switch (m.kind) {
+      case 'stop':
+        if (this.currentId) this.streams.get(this.currentId)?.abort.abort();
+        return;
+      case 'openSettings':
+        void vscode.commands.executeCommand('ojAgent.ai.openSettings');
+        return;
+      case 'clear':
+        await this.handleClear();
+        return;
+      case 'send':
+        await this.sendUser(m.text);
+        return;
+      case 'newConversation':
+        await this.createAndShowNew();
+        return;
+      case 'switchConversation':
+        await this.switchConversation(m.id);
+        return;
+      case 'renameConversation':
+        this.services.conversations.setTitle(m.id, m.title);
+        return;
+      case 'deleteConversation':
+        await this.deleteConversation(m.id);
+        return;
+      case 'setActiveProfile':
+        await this.services.profiles.setActive(m.id);
+        AIPanel.refreshState(this.services);
+        return;
     }
   }
+
+  private async handleClear(): Promise<void> {
+    if (!this.currentId) return;
+    const confirm = await vscode.window.showWarningMessage(
+      '确认清空当前对话？',
+      { modal: true },
+      '清空',
+    );
+    if (confirm !== '清空') return;
+    const id = this.currentId;
+    this.streams.get(id)?.abort.abort();
+    this.services.conversations.clearMessages(id);
+    this.postOut({ kind: 'cleared', conversationId: id });
+  }
+
+  private async switchConversation(id: string): Promise<void> {
+    if (id === this.currentId) return;
+    const conv = this.services.conversations.get(id);
+    if (!conv) return;
+    // 不 abort 离开会话的流：后台继续生成，commit 时仍写入原会话
+    this.currentId = id;
+    if (conv.topic) this.panel.title = conv.topic;
+    else this.panel.title = conv.title || 'OJ-Agent:AI 助手';
+    await this.pushInit(conv);
+  }
+
+  private async deleteConversation(id: string): Promise<void> {
+    const conv = this.services.conversations.get(id);
+    if (!conv) return;
+    const confirm = await vscode.window.showWarningMessage(
+      `确认删除会话 "${conv.title}"？`,
+      { modal: true },
+      '删除',
+    );
+    if (confirm !== '删除') return;
+    this.streams.get(id)?.abort.abort();
+    this.streams.delete(id);
+    this.services.conversations.remove(id);
+    if (this.currentId === id) {
+      const next = this.services.conversations.latest();
+      if (next) {
+        this.currentId = next.id;
+        await this.pushInit(next);
+      } else {
+        await this.createAndShowNew();
+      }
+    }
+  }
+
+  // ─── private: 发送与流式 ────────────────────────────
 
   private async sendUser(text: string): Promise<void> {
     const trimmed = text.trim();
     if (!trimmed) return;
-    this.history.push({ role: 'user', content: trimmed });
+    const id = this.currentId;
+    if (!id) return;
+    this.services.conversations.appendMessage(id, { role: 'user', content: trimmed });
     const html = await renderMarkdown(trimmed);
-    this.postOut({ kind: 'userMsg', html });
-    await this.runStream();
+    this.postOut({ kind: 'userMsg', conversationId: id, html });
+    await this.runStream(id);
   }
 
-  /** 将历史拼接为 user prompt 传给 runner（runner 当前只接收 system + user 字符串） */
-  private composeUserPrompt(): string {
-    // 第一条用户消息已通过 system+initial user 启动；之后的多轮拼接为简单的对话格式
-    if (this.history.length === 1) {
-      return this.history[0]!.content;
-    }
+  private composeUserPrompt(conv: Conversation): string {
+    if (conv.messages.length === 1) return conv.messages[0]!.content;
     const lines: string[] = [];
-    for (const m of this.history) {
+    for (const m of conv.messages) {
       if (m.role === 'user') lines.push(`用户：${m.content}`);
       else lines.push(`助手：${m.content}`);
     }
@@ -202,93 +351,123 @@ export class AIPanel {
     return lines.join('\n\n');
   }
 
-  private async runStream(): Promise<void> {
+  private async runStream(conversationId: string): Promise<void> {
     const profile = this.services.profiles.getActive();
     if (!profile) {
-      this.postOut({ kind: 'error', message: '当前无可用 Profile' });
+      this.postOut({ kind: 'error', conversationId, message: '当前无可用 Profile' });
       return;
     }
     const apiKey = await this.services.vault.get(profile.id);
     if (!apiKey) {
-      this.postOut({ kind: 'error', message: `Profile "${profile.label}" 未配置 API Key` });
+      this.postOut({
+        kind: 'error',
+        conversationId,
+        message: `Profile "${profile.label}" 未配置 API Key`,
+      });
       return;
     }
+    const conv = this.services.conversations.get(conversationId);
+    if (!conv) return;
 
-    this.abortCtl?.abort();
-    this.abortCtl = new AbortController();
-    this.streaming = '';
-    this.postOut({ kind: 'assistantStart' });
+    // 已有该会话的流先中断
+    this.streams.get(conversationId)?.abort.abort();
+    const state: StreamingState = {
+      conversationId,
+      accumulated: '',
+      abort: new AbortController(),
+      renderTimer: null,
+    };
+    this.streams.set(conversationId, state);
+    this.postOut({ kind: 'assistantStart', conversationId });
 
     try {
       for await (const chunk of this.services.runner.run({
         profile,
         apiKey,
-        system: this.systemPrompt,
-        user: this.composeUserPrompt(),
-        signal: this.abortCtl.signal,
+        system: conv.systemPrompt,
+        user: this.composeUserPrompt(conv),
+        signal: state.abort.signal,
         redactEnabled: isRedactEnabled(),
       })) {
         if (chunk.type === 'text' && chunk.text) {
-          this.streaming += chunk.text;
-          this.scheduleStreamRender();
+          state.accumulated += chunk.text;
+          this.scheduleStreamRender(state);
         } else if (chunk.type === 'done') {
-          await this.commitAssistant();
+          await this.commitAssistant(state);
           return;
         } else if (chunk.type === 'error') {
-          this.cancelStreamRender();
+          this.cancelStreamRender(state);
           this.postOut({
             kind: 'error',
+            conversationId,
             message: chunk.error?.message ?? 'unknown error',
             httpStatus: chunk.error?.httpStatus,
           });
           return;
         }
       }
-      await this.commitAssistant();
+      await this.commitAssistant(state);
     } catch (e) {
-      this.cancelStreamRender();
+      this.cancelStreamRender(state);
+      if (state.abort.signal.aborted) {
+        // 用户切走/删除/清空触发的中断 — 把已累积内容写入原会话作为收尾
+        await this.commitAssistant(state);
+        return;
+      }
       if (e instanceof RateLimitError) {
-        this.postOut({ kind: 'error', message: e.message, rateLimit: e.retryAfterSeconds });
+        this.postOut({
+          kind: 'error',
+          conversationId,
+          message: e.message,
+          rateLimit: e.retryAfterSeconds,
+        });
       } else {
-        this.postOut({ kind: 'error', message: e instanceof Error ? e.message : String(e) });
+        this.postOut({
+          kind: 'error',
+          conversationId,
+          message: e instanceof Error ? e.message : String(e),
+        });
       }
     } finally {
-      this.abortCtl = null;
+      // 流结束（无论正常/异常）从 streams 表移除（注意：commitAssistant 内已写入）
+      const cur = this.streams.get(conversationId);
+      if (cur === state) this.streams.delete(conversationId);
     }
   }
 
-  /** 节流地把当前累积的 streaming markdown 渲染并推到 webview。 */
-  private scheduleStreamRender(): void {
-    if (this.renderTimer) return;
-    this.renderTimer = setTimeout(() => {
-      this.renderTimer = null;
-      void this.flushStreamRender();
+  private scheduleStreamRender(state: StreamingState): void {
+    if (state.renderTimer) return;
+    state.renderTimer = setTimeout(() => {
+      state.renderTimer = null;
+      void this.flushStreamRender(state);
     }, STREAM_RENDER_INTERVAL_MS);
   }
 
-  private async flushStreamRender(): Promise<void> {
-    const snapshot = this.streaming;
-    if (!snapshot) return;
-    const html = await renderMarkdown(snapshot);
-    this.postOut({ kind: 'assistantHtml', html });
+  private async flushStreamRender(state: StreamingState): Promise<void> {
+    if (!state.accumulated) return;
+    // 始终推送：webview 端通过 conversationId 自行决定是否应用 — 切走的会话静默忽略
+    const html = await renderMarkdown(state.accumulated);
+    this.postOut({ kind: 'assistantHtml', conversationId: state.conversationId, html });
   }
 
-  private cancelStreamRender(): void {
-    if (this.renderTimer) {
-      clearTimeout(this.renderTimer);
-      this.renderTimer = null;
+  private cancelStreamRender(state: StreamingState): void {
+    if (state.renderTimer) {
+      clearTimeout(state.renderTimer);
+      state.renderTimer = null;
     }
   }
 
-  private async commitAssistant(): Promise<void> {
-    this.cancelStreamRender();
-    const final = this.streaming;
+  private async commitAssistant(state: StreamingState): Promise<void> {
+    this.cancelStreamRender(state);
+    const final = state.accumulated;
     if (final) {
-      this.history.push({ role: 'assistant', content: final });
+      this.services.conversations.appendMessage(state.conversationId, {
+        role: 'assistant',
+        content: final,
+      });
     }
-    this.streaming = '';
     const html = final ? await renderMarkdown(final) : '';
-    this.postOut({ kind: 'assistantDone', html });
+    this.postOut({ kind: 'assistantDone', conversationId: state.conversationId, html });
   }
 
   private postOut(msg: WebviewMsgOut): void {
@@ -296,9 +475,11 @@ export class AIPanel {
   }
 
   private dispose(): void {
-    this.abortCtl?.abort();
-    this.abortCtl = null;
-    this.cancelStreamRender();
+    for (const s of this.streams.values()) {
+      s.abort.abort();
+      if (s.renderTimer) clearTimeout(s.renderTimer);
+    }
+    this.streams.clear();
     for (const d of this.disposables) {
       try {
         d.dispose();
@@ -334,6 +515,7 @@ ${getMarkdownStyleBlock()}
     --bg-soft: var(--vscode-editorWidget-background);
     --bg-input: var(--vscode-input-background);
     --bg-hover: var(--vscode-list-hoverBackground, rgba(127,127,127,0.1));
+    --bg-active: var(--vscode-list-activeSelectionBackground, rgba(127,127,127,0.2));
     --border: var(--vscode-widget-border, rgba(127,127,127,0.18));
     --focus: var(--vscode-focusBorder);
     --error: var(--vscode-errorForeground);
@@ -348,13 +530,14 @@ ${getMarkdownStyleBlock()}
     flex-direction: column;
     font-size: 13px;
     line-height: 1.6;
+    overflow: hidden;
   }
 
   /* ── Header ── */
   .chat-header {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 4px;
     padding: 8px 12px;
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
@@ -367,75 +550,137 @@ ${getMarkdownStyleBlock()}
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    margin-left: 2px;
   }
-  .chat-header .profile {
-    font-size: 11px;
-    color: var(--fg-muted);
-    white-space: nowrap;
-    padding-right: 4px;
-  }
-  .chat-header .profile::before {
-    content: '';
-    display: inline-block;
-    width: 6px; height: 6px;
-    border-radius: 50%;
-    background: #4ade80;
-    margin-right: 6px;
-    vertical-align: middle;
-  }
-  .chat-header .profile.off::before { background: var(--fg-muted); opacity: 0.5; }
   .icon-btn {
-    width: 26px; height: 26px;
+    width: 28px; height: 28px;
     display: inline-flex; align-items: center; justify-content: center;
     background: transparent;
     color: var(--fg-muted);
     border: 0;
     cursor: pointer;
-    border-radius: 4px;
+    border-radius: 5px;
     flex-shrink: 0;
+    transition: background 0.12s, color 0.12s;
   }
   .icon-btn:hover { background: var(--bg-hover); color: var(--fg); }
-  .icon-btn svg { width: 14px; height: 14px; }
+  .icon-btn.active { background: var(--bg-hover); color: var(--fg); }
+  .icon-btn svg { width: 15px; height: 15px; stroke-width: 1.6; }
+
+  /* ── History popover ── */
+  .history-popover {
+    position: fixed;
+    top: 44px;
+    left: 12px;
+    width: 280px;
+    max-height: 60vh;
+    background: var(--vscode-menu-background, var(--bg-soft));
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 8px 28px rgba(0,0,0,0.32);
+    overflow: hidden;
+    display: none;
+    flex-direction: column;
+    z-index: 20;
+  }
+  .history-popover.open { display: flex; }
+  .history-popover-header {
+    padding: 6px 10px;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--fg-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .history-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 0;
+  }
+  .history-empty {
+    padding: 24px 12px;
+    text-align: center;
+    color: var(--fg-muted);
+    font-size: 11px;
+  }
+  .conv-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 10px;
+    cursor: pointer;
+    position: relative;
+  }
+  .conv-item:hover { background: var(--bg-hover); }
+  .conv-item.active { background: var(--bg-active); }
+  .conv-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+  }
+  .conv-title[contenteditable="true"] {
+    background: var(--bg-input);
+    outline: 1px solid var(--focus);
+    border-radius: 2px;
+    padding: 1px 4px;
+    text-overflow: clip;
+  }
+  .conv-time {
+    font-size: 10px;
+    color: var(--fg-muted);
+    flex-shrink: 0;
+  }
+  .conv-actions {
+    display: none;
+    gap: 1px;
+    flex-shrink: 0;
+  }
+  .conv-item:hover .conv-actions { display: inline-flex; }
+  .conv-item:hover .conv-time { display: none; }
+  .conv-actions .icon-btn { width: 20px; height: 20px; }
+  .conv-actions .icon-btn svg { width: 11px; height: 11px; }
 
   /* ── Messages ── */
   #messages {
     flex: 1;
     overflow-y: auto;
-    padding: 16px 14px;
+    padding: 20px 16px 8px;
     display: flex;
     flex-direction: column;
-    gap: 18px;
+    gap: 14px;
   }
-  .msg { display: flex; flex-direction: column; gap: 4px; max-width: 100%; }
-  .msg .role {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--fg-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+  .msg {
+    display: flex;
+    max-width: 100%;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
   }
-  .msg .role svg { width: 12px; height: 12px; }
+  .msg.user { justify-content: flex-end; }
+  .msg.assistant { justify-content: flex-start; }
   .msg .bubble {
-    padding: 0;
+    max-width: min(92%, 720px);
     word-wrap: break-word;
     overflow-wrap: break-word;
   }
   .msg.user .bubble {
     background: var(--bg-soft);
     border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 10px 12px;
+    border-radius: 12px 12px 4px 12px;
+    padding: 8px 12px;
   }
   .msg.assistant .bubble {
     padding: 2px 0;
+    width: 100%;
+    max-width: 100%;
   }
   .bubble.markdown-body > :first-child { margin-top: 0; }
   .bubble.markdown-body > :last-child { margin-bottom: 0; }
 
-  /* loading dots */
   .typing { display: inline-flex; gap: 4px; padding: 6px 0; }
   .typing span {
     width: 5px; height: 5px; border-radius: 50%;
@@ -446,7 +691,6 @@ ${getMarkdownStyleBlock()}
   .typing span:nth-child(3) { animation-delay: 0.3s; }
   @keyframes typing { 0%, 60%, 100% { opacity: 0.25; } 30% { opacity: 1; } }
 
-  /* empty state */
   .empty-state {
     flex: 1;
     display: flex;
@@ -461,7 +705,6 @@ ${getMarkdownStyleBlock()}
   .empty-state h2 { font-size: 14px; font-weight: 600; margin-bottom: 6px; color: var(--fg); }
   .empty-state p { font-size: 12px; }
 
-  /* error banner */
   #error {
     margin: 0 14px 8px;
     padding: 8px 12px;
@@ -473,25 +716,21 @@ ${getMarkdownStyleBlock()}
     display: none;
   }
 
-  /* ── Composer ── */
-  .composer {
-    padding: 8px 12px 12px;
-    border-top: 1px solid var(--border);
+  /* ── Composer card ── */
+  .composer-wrap {
+    padding: 6px 12px 12px;
     flex-shrink: 0;
   }
-  .composer-row {
-    display: flex;
-    gap: 6px;
-    align-items: flex-end;
+  .composer-card {
     background: var(--bg-input);
     border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 4px 4px 4px 10px;
+    border-radius: 10px;
+    padding: 8px 10px 6px;
     transition: border-color 0.15s;
   }
-  .composer-row:focus-within { border-color: var(--focus); }
+  .composer-card:focus-within { border-color: var(--focus); }
   #input {
-    flex: 1;
+    width: 100%;
     background: transparent;
     color: var(--vscode-input-foreground);
     border: 0;
@@ -500,17 +739,140 @@ ${getMarkdownStyleBlock()}
     font-size: 13px;
     line-height: 1.5;
     resize: none;
-    padding: 6px 0;
+    padding: 2px 0 4px;
     max-height: 200px;
-    min-height: 22px;
+    min-height: 24px;
+    display: block;
   }
+  .composer-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding-top: 4px;
+    border-top: 1px solid var(--border);
+    margin-top: 2px;
+  }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 24px;
+    padding: 0 9px 0 8px;
+    border-radius: 12px;
+    background: var(--bg-soft);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    font-size: 11px;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s;
+    position: relative;
+  }
+  .chip:hover { background: var(--bg-hover); border-color: var(--focus); }
+  .chip .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #4ade80;
+    flex-shrink: 0;
+    box-shadow: 0 0 0 2px rgba(74,222,128,0.18);
+  }
+  .chip .dot.off { background: var(--fg-muted); opacity: 0.5; box-shadow: none; }
+  .chip .profile-label {
+    font-weight: 500;
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .chip select.profile-select {
+    /* 完全隐藏原生 select，仅作为数据源占位；交互通过自定义弹层完成 */
+    display: none;
+  }
+  .chip.disabled { cursor: not-allowed; opacity: 0.7; }
+  .chip .caret {
+    font-size: 9px;
+    opacity: 0.6;
+    margin-left: 1px;
+    transition: transform 0.15s;
+  }
+  .chip.open .caret { transform: rotate(180deg); opacity: 0.9; }
+
+  .profile-popover {
+    position: fixed;
+    min-width: 200px;
+    max-width: 280px;
+    max-height: 50vh;
+    background: var(--vscode-menu-background, var(--bg-soft));
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 8px 28px rgba(0,0,0,0.32);
+    overflow: hidden;
+    display: none;
+    flex-direction: column;
+    z-index: 20;
+    padding: 4px 0;
+  }
+  .profile-popover.open { display: flex; }
+  .profile-popover-empty {
+    padding: 14px 12px;
+    text-align: center;
+    color: var(--fg-muted);
+    font-size: 11px;
+  }
+  .profile-list {
+    overflow-y: auto;
+    padding: 0;
+  }
+  .profile-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px 6px 8px;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--fg);
+    user-select: none;
+  }
+  .profile-item:hover { background: var(--bg-hover); }
+  .profile-item .check {
+    width: 12px;
+    height: 12px;
+    flex-shrink: 0;
+    color: var(--focus);
+    opacity: 0;
+  }
+  .profile-item.active .check { opacity: 1; }
+  .profile-item .name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .profile-item .meta {
+    font-size: 10px;
+    color: var(--fg-muted);
+    flex-shrink: 0;
+  }
+  .profile-popover-footer {
+    border-top: 1px solid var(--border);
+    padding: 6px 10px 6px 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 11px;
+    color: var(--fg-muted);
+  }
+  .profile-popover-footer:hover { background: var(--bg-hover); color: var(--fg); }
+  .profile-popover-footer svg { width: 12px; height: 12px; flex-shrink: 0; }
+  .toolbar-spacer { flex: 1; }
   .send-btn {
     flex-shrink: 0;
     background: var(--vscode-button-background);
     color: var(--vscode-button-foreground);
     border: 0;
-    border-radius: 4px;
-    width: 28px; height: 28px;
+    border-radius: 999px;
+    width: 26px; height: 26px;
     display: flex; align-items: center; justify-content: center;
     cursor: pointer;
     transition: background 0.12s, opacity 0.12s;
@@ -523,28 +885,36 @@ ${getMarkdownStyleBlock()}
     border: 1px solid var(--error);
   }
   .send-btn.stop:hover:not(:disabled) { background: rgba(248,113,113,0.1); }
-  .send-btn svg { width: 13px; height: 13px; }
-  .composer-hint {
-    font-size: 10px;
-    color: var(--fg-muted);
-    margin-top: 6px;
-    opacity: 0.7;
-    display: flex;
-    justify-content: space-between;
+  .send-btn svg { width: 12px; height: 12px; }
+
+  .popover-mask {
+    position: fixed; inset: 0;
+    background: transparent;
+    display: none;
+    z-index: 15;
   }
+  .popover-mask.open { display: block; }
 </style></head><body>
 <div class="chat-header">
+  <button class="icon-btn" id="historyBtn" title="历史会话">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></svg>
+  </button>
   <h1 id="title">AI 助手</h1>
-  <span class="profile off" id="profileBadge">--</span>
-  <button class="icon-btn" id="clearBtn" title="清空对话">
-<svg t="1779559643121" class="icon" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg" p-id="1753" width="200" height="200"><path d="M254.398526 804.702412l-0.030699-4.787026C254.367827 801.546535 254.380106 803.13573 254.398526 804.702412zM614.190939 259.036661c-22.116717 0-40.047088 17.910928-40.047088 40.047088l0.37146 502.160911c0 22.097274 17.930371 40.048111 40.047088 40.048111s40.048111-17.950837 40.048111-40.048111l-0.350994-502.160911C654.259516 276.948613 636.328122 259.036661 614.190939 259.036661zM893.234259 140.105968l-318.891887 0.148379-0.178055-41.407062c0-22.13616-17.933441-40.048111-40.067554-40.048111-7.294127 0-14.126742 1.958608-20.017916 5.364171-5.894244-3.405563-12.729929-5.364171-20.031219-5.364171-22.115694 0-40.047088 17.911952-40.047088 40.048111l0.188288 41.463344-230.115981 0.106424c-3.228531-0.839111-6.613628-1.287319-10.104125-1.287319-3.502777 0-6.89913 0.452301-10.136871 1.296529l-73.067132 0.033769c-22.115694 0-40.048111 17.950837-40.048111 40.047088 0 22.13616 17.931395 40.048111 40.048111 40.048111l43.176358-0.020466 0.292666 617.902982 0.059352 0 0 42.551118c0 44.233434 35.862789 80.095199 80.095199 80.095199l40.048111 0 0 0.302899 440.523085-0.25685 0-0.046049 40.048111 0c43.663452 0 79.146595-34.95 80.054267-78.395488l-0.329505-583.369468c0-22.135136-17.930371-40.047088-40.048111-40.047088-22.115694 0-40.047088 17.911952-40.047088 40.047088l0.287549 509.324054c-1.407046 60.314691-18.594497 71.367421-79.993892 71.367421l41.575908 1.022283-454.442096 0.26606 52.398394-1.288343c-62.715367 0-79.305207-11.522428-80.0645-75.308173l0.493234 76.611865-0.543376 0-0.313132-660.818397 236.82273-0.109494c1.173732 0.103354 2.360767 0.166799 3.561106 0.166799 1.215688 0 2.416026-0.063445 3.604084-0.169869l32.639375-0.01535c1.25355 0.118704 2.521426 0.185218 3.805676 0.185218 1.299599 0 2.582825-0.067538 3.851725-0.188288l354.913289-0.163729c22.115694 0 40.050158-17.911952 40.050158-40.047088C933.283394 158.01792 915.349953 140.105968 893.234259 140.105968zM774.928806 815.294654l0.036839 65.715701-0.459464 0L774.928806 815.294654zM413.953452 259.036661c-22.116717 0-40.048111 17.910928-40.048111 40.047088l0.37146 502.160911c0 22.097274 17.931395 40.048111 40.049135 40.048111 22.115694 0 40.047088-17.950837 40.047088-40.048111l-0.37146-502.160911C454.00054 276.948613 436.069145 259.036661 413.953452 259.036661z" fill="currentColor" p-id="1754"></path></svg>
+  <button class="icon-btn" id="newConvBtn" title="新建对话">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H8l-4 4V5a2 2 0 0 1 2-2h7"/><path d="M19 3v6"/><path d="M16 6h6"/></svg>
+  </button>
+  <button class="icon-btn" id="clearBtn" title="清空当前对话">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
   </button>
   <button class="icon-btn" id="settingsBtn" title="AI 设置">
-    <svg viewBox="0 0 1024 1024" fill="currentColor">
-      <path d="M509.4 666.1c-83.6 0-151.5-67.9-151.5-151.5s67.9-151.5 151.5-151.5 151.5 67.9 151.5 151.5-67.9 151.5-151.5 151.5z m0-261.2c-60.6 0-109.7 49.1-109.7 109.7s49.1 109.7 109.7 109.7 109.7-49.1 109.7-109.7-49.1-109.7-109.7-109.7z"/>
-      <path d="M556.4 930h-83.6c-47.5 0-86.2-38.7-86.2-86.2v-23c0-1-0.5-2.1-1.6-2.6h-0.5c-1-0.5-2.1 0-3.1 0.5l-14.6 15.2c-16.2 16.2-37.1 25.1-59.6 25.1-22.5 0-43.4-8.9-59-24.6l-59-59c-32.4-32.4-32.4-85.2 0-118.1l15.7-15.2c1-1 1-2.1 0.5-3.1v-0.5c-0.5-1-1.6-1.6-2.6-1.6h-23c-47.5 0-86.2-38.7-86.2-86.2v-78.4c0.5-47 39.2-85.7 86.7-85.7h21.4c1 0 2.1-0.5 2.6-2.1 0.5-1 1-2.6 1.6-3.7 0.5-1 0-2.1-0.5-3.1l-16.2-16.7c-32.4-32.4-32.4-85.7 0-118l59-59c15.7-15.7 36.6-24.6 59-24.6 22.5 0 43.4 8.9 59 24.6l15.2 15.7c0.5 1 2.1 1 3.1 0.5h0.5c1-0.5 1.6-1.6 1.6-2.6v-17.8c0-47.5 38.7-86.2 86.2-86.2h83.6c44.4 0 81 36.6 81 81v21.4c0 1 0.5 2.1 2.1 2.6 1.6 0.5 2.6 1 3.7 1.6 1 0.5 2.1 0 3.1-0.5l16.7-16.2c32.4-32.4 85.2-32.4 118.1 0.5l59 59c15.7 15.7 24.6 36.6 24.6 59 0 22.5-8.9 43.4-24.6 59l-15.7 16.2c-0.5 0.5-1 2.1-0.5 2.6 0.5 1 1 2.6 1.6 3.7 0.5 1 1.6 2.1 2.6 2.1h21.4c44.4 0 81 36.6 81 81v88.8c0 44.4-36.6 81-81 81h-23c-1 0-2.1 0.5-2.6 1.6-0.5 1.6-0.5 2.6 0.5 3.7l15.2 14.6c16.2 16.2 25.1 37.1 24.6 59.6 0 22.5-8.9 43.4-24.6 59l-59 59c-15.7 15.7-36.6 24.6-59 24.6s-43.4-8.9-59-24.6l-16.2-15.7c-0.5-0.5-2.1-1-2.6-0.5-1 0.5-2.6 1-3.7 1.6-1 0.5-2.1 1.6-2.1 2.6V844c0 49.4-36.6 86-81 86zM402.3 780.5c16.2 7.3 26.1 23 26.1 40.8V844c0 24.6 19.9 44.4 44.4 44.4h83.6c21.4 0 39.2-17.8 39.2-39.2v-26.6c0-18.3 11-34.5 28.2-41.3 1-0.5 1.6-0.5 2.6-1 16.7-7.3 35.5-3.7 48.6 8.9l16.2 15.7c16.7 16.7 43.4 16.7 59.6 0l59-59c7.8-7.8 12-18.3 12-29.8 0-11-4.2-21.4-12-29.8l-14.6-14.1c-13.6-13.1-17.8-32.9-9.9-50.2v-0.5c6.8-15.7 23-26.1 40.8-26.1h23c21.4 0 39.2-17.8 39.2-39.2v-88.8c0-21.4-17.8-39.2-39.2-39.2h-21.4c-18.3 0-34.5-11-41.3-28.2-0.5-1-0.5-1.6-1-2.6-7.3-16.7-3.7-35.5 8.9-48.6l15.7-16.2c7.8-7.8 12.5-18.8 12.5-29.8 0-11.5-4.2-21.9-12-29.8l-59.6-59c-16.2-16.2-42.8-16.2-59 0l-17.2 16.2c-13.1 12.5-32.4 15.7-48.6 8.9-0.5-0.5-1.6-0.5-2.6-1-17.2-6.8-28.2-23-28.2-41.3v-21.4c0-21.4-17.8-39.2-39.2-39.2h-83.6c-24.6 0-44.4 19.9-44.4 44.4v17.8c0 17.8-10.4 33.4-26.6 40.8-17.2 7.8-37.1 3.7-50.2-9.4l-15.2-15.7c-7.8-7.8-18.3-12-29.3-12-11 0-21.4 4.2-29.3 12l-59 59c-16.2 16.2-16.2 42.8 0 59l16.2 17.2c12.5 13.1 16.2 32.4 8.9 48.6-0.5 0.5-0.5 1.6-1 2.6-6.8 17.2-23 28.2-41.3 28.2h-21.4c-24.6 0-44.4 19.9-44.4 44.4v78.4c0 24.6 19.9 44.4 44.4 44.4h23c17.8 0 33.4 10.4 40.8 26.6v0.5c7.3 16.7 3.7 37.1-9.4 49.6l-15.7 15.2c-16.2 16.2-16.2 42.3 0 58.5l59 59c7.8 7.8 18.3 12 29.3 12 11 0 21.4-4.2 29.8-12.5l14.1-14.6c13.1-13.6 32.9-17.8 50.2-9.9l1 0.5z"/>
-    </svg>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
   </button>
+</div>
+
+<div class="popover-mask" id="popoverMask"></div>
+<div class="history-popover" id="historyPopover">
+  <div class="history-popover-header">对话历史</div>
+  <div class="history-list" id="convList"></div>
 </div>
 
 <div id="messages">
@@ -559,19 +929,30 @@ ${getMarkdownStyleBlock()}
 
 <div id="error"></div>
 
-<div class="composer">
-  <div class="composer-row">
+<div class="composer-wrap">
+  <div class="composer-card">
     <textarea id="input" rows="1" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
-    <button class="send-btn" id="sendBtn" title="发送" disabled>
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M14 8L2.5 2.5L4.5 8L2.5 13.5z"/>
-        <path d="M4.5 8H14"/>
-      </svg>
-    </button>
-  </div>
-  <div class="composer-hint">
-    <span id="hintLeft">Enter 发送 / Shift+Enter 换行</span>
-    <span id="hintRight"></span>
+    <div class="composer-toolbar">
+      <span class="chip" id="profileChip" title="切换 AI Profile">
+        <span class="dot" id="profileDot"></span>
+        <span class="profile-label" id="profileLabel">未配置</span>
+        <span class="caret">▾</span>
+        <select class="profile-select" id="profileSelect" aria-label="AI Profile"></select>
+      </span>
+      <div class="profile-popover" id="profilePopover" role="listbox">
+        <div class="profile-list" id="profileList"></div>
+        <div class="profile-popover-footer" id="profileSettingsEntry" title="打开 AI 设置">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <span>管理 AI Profile…</span>
+        </div>
+      </div>
+      <span class="toolbar-spacer"></span>
+      <button class="send-btn" id="sendBtn" title="发送" disabled>
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M8 13V3M3.5 7.5L8 3l4.5 4.5"/>
+        </svg>
+      </button>
+    </div>
   </div>
 </div>
 
@@ -579,15 +960,225 @@ ${getMarkdownStyleBlock()}
   const vscode = acquireVsCodeApi();
   const $ = (id) => document.getElementById(id);
 
-  const ICON_USER = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="5.5" r="2.5"/><path d="M3 13.5a5 5 0 0 1 10 0"/></svg>';
-  const ICON_AI = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2l1.4 3.6L13 7l-3.6 1.4L8 12l-1.4-3.6L3 7l3.6-1.4z"/></svg>';
-  const ICON_SEND = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 8L2.5 2.5L4.5 8L2.5 13.5z"/><path d="M4.5 8H14"/></svg>';
+  const ICON_SEND = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3M3.5 7.5L8 3l4.5 4.5"/></svg>';
   const ICON_STOP = '<svg viewBox="0 0 16 16" fill="currentColor"><rect x="4" y="4" width="8" height="8" rx="1"/></svg>';
+  const ICON_EDIT = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M11.5 2.5l2 2L5 13H3v-2z"/></svg>';
+  const ICON_DELETE = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h10M6.5 5V3.5h3V5M5 5l0.8 8.2a1 1 0 0 0 1 0.8h2.4a1 1 0 0 0 1-0.8L11 5"/></svg>';
 
-  let isStreaming = false;
+  let state = {
+    streaming: false,
+    currentId: '',
+    conversations: [],
+    profiles: [],
+    activeProfileId: '',
+    redact: true,
+  };
   let currentAssistantBubble = null;
   let userScrolled = false;
 
+  // ── history popover ──
+  function setPopoverOpen(open) {
+    $('historyPopover').classList.toggle('open', open);
+    $('popoverMask').classList.toggle('open', open);
+    $('historyBtn').classList.toggle('active', open);
+  }
+  $('historyBtn').onclick = (e) => {
+    e.stopPropagation();
+    const open = !$('historyPopover').classList.contains('open');
+    setPopoverOpen(open);
+  };
+  $('popoverMask').onclick = () => {
+    setPopoverOpen(false);
+    setProfilePopoverOpen(false);
+  };
+
+  // ── conversation list ──
+  function formatTime(ts) {
+    if (!ts) return '';
+    const diff = Date.now() - ts;
+    if (diff < 60_000) return '刚刚';
+    if (diff < 3600_000) return Math.floor(diff / 60_000) + ' 分钟';
+    if (diff < 86_400_000) return Math.floor(diff / 3600_000) + ' 时';
+    return new Date(ts).toLocaleDateString();
+  }
+
+  function renderConvList() {
+    const root = $('convList');
+    root.innerHTML = '';
+    if (!state.conversations || state.conversations.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'history-empty';
+      empty.textContent = '暂无历史会话';
+      root.appendChild(empty);
+      return;
+    }
+    for (const c of state.conversations) {
+      const item = document.createElement('div');
+      item.className = 'conv-item' + (c.id === state.currentId ? ' active' : '');
+      item.dataset.id = c.id;
+
+      const title = document.createElement('span');
+      title.className = 'conv-title';
+      title.textContent = c.title || '新对话';
+
+      const time = document.createElement('span');
+      time.className = 'conv-time';
+      time.textContent = formatTime(c.updatedAt);
+
+      const actions = document.createElement('span');
+      actions.className = 'conv-actions';
+      const editBtn = document.createElement('button');
+      editBtn.className = 'icon-btn';
+      editBtn.title = '重命名';
+      editBtn.innerHTML = ICON_EDIT;
+      editBtn.onclick = (e) => { e.stopPropagation(); enterRename(item, c.id, title); };
+      const delBtn = document.createElement('button');
+      delBtn.className = 'icon-btn';
+      delBtn.title = '删除';
+      delBtn.innerHTML = ICON_DELETE;
+      delBtn.onclick = (e) => { e.stopPropagation(); vscode.postMessage({ kind: 'deleteConversation', id: c.id }); };
+      actions.appendChild(editBtn);
+      actions.appendChild(delBtn);
+
+      item.appendChild(title);
+      item.appendChild(time);
+      item.appendChild(actions);
+
+      item.onclick = () => {
+        if (c.id !== state.currentId) vscode.postMessage({ kind: 'switchConversation', id: c.id });
+        setPopoverOpen(false);
+      };
+      title.ondblclick = (e) => { e.stopPropagation(); enterRename(item, c.id, title); };
+
+      root.appendChild(item);
+    }
+  }
+
+  function enterRename(item, id, titleEl) {
+    titleEl.setAttribute('contenteditable', 'true');
+    titleEl.focus();
+    const range = document.createRange();
+    range.selectNodeContents(titleEl);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    const finish = (commit) => {
+      titleEl.removeAttribute('contenteditable');
+      titleEl.removeEventListener('blur', onBlur);
+      titleEl.removeEventListener('keydown', onKey);
+      if (commit) {
+        const t = titleEl.textContent.trim();
+        vscode.postMessage({ kind: 'renameConversation', id, title: t });
+      } else {
+        const existing = state.conversations.find((x) => x.id === id);
+        if (existing) titleEl.textContent = existing.title;
+      }
+    };
+    const onBlur = () => finish(true);
+    const onKey = (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+      else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+    };
+    titleEl.addEventListener('blur', onBlur);
+    titleEl.addEventListener('keydown', onKey);
+  }
+
+  // ── profile chip ──
+  function renderProfileChip() {
+    const sel = $('profileSelect');
+    const label = $('profileLabel');
+    const list = $('profileList');
+    const chip = $('profileChip');
+    sel.innerHTML = '';
+    list.innerHTML = '';
+    if (!state.profiles || state.profiles.length === 0) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = '未配置';
+      sel.appendChild(opt);
+      sel.disabled = true;
+      label.textContent = '未配置';
+      chip.classList.add('disabled');
+      $('profileDot').classList.add('off');
+      const empty = document.createElement('div');
+      empty.className = 'profile-popover-empty';
+      empty.textContent = '暂无可用 Profile，去设置添加';
+      list.appendChild(empty);
+      return;
+    }
+    let activeLabel = '';
+    for (const p of state.profiles) {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = p.label;
+      if (p.id === state.activeProfileId) {
+        opt.selected = true;
+        activeLabel = p.label;
+      }
+      sel.appendChild(opt);
+
+      const item = document.createElement('div');
+      item.className = 'profile-item' + (p.id === state.activeProfileId ? ' active' : '');
+      item.setAttribute('role', 'option');
+      item.dataset.id = p.id;
+      const meta = p.provider || p.model || '';
+      item.innerHTML =
+        '<svg class="check" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3 3 7-7"/></svg>'
+        + '<span class="name"></span>'
+        + (meta ? '<span class="meta"></span>' : '');
+      item.querySelector('.name').textContent = p.label;
+      if (meta) item.querySelector('.meta').textContent = meta;
+      item.addEventListener('click', () => {
+        setProfilePopoverOpen(false);
+        if (p.id !== state.activeProfileId) {
+          vscode.postMessage({ kind: 'setActiveProfile', id: p.id });
+        }
+      });
+      list.appendChild(item);
+    }
+    sel.disabled = false;
+    chip.classList.remove('disabled');
+    label.textContent = activeLabel || state.profiles[0].label;
+    $('profileDot').classList.remove('off');
+  }
+  function setProfilePopoverOpen(open) {
+    const pop = $('profilePopover');
+    const chip = $('profileChip');
+    if (open) {
+      const rect = chip.getBoundingClientRect();
+      pop.style.visibility = 'hidden';
+      pop.classList.add('open');
+      const popRect = pop.getBoundingClientRect();
+      pop.style.visibility = '';
+      let top = rect.top - popRect.height - 6;
+      if (top < 8) top = rect.bottom + 6;
+      let left = rect.left;
+      const maxLeft = window.innerWidth - popRect.width - 8;
+      if (left > maxLeft) left = Math.max(8, maxLeft);
+      pop.style.top = top + 'px';
+      pop.style.left = left + 'px';
+      $('popoverMask').classList.add('open');
+      chip.classList.add('open');
+    } else {
+      pop.classList.remove('open');
+      chip.classList.remove('open');
+      if (!$('historyPopover').classList.contains('open')) {
+        $('popoverMask').classList.remove('open');
+      }
+    }
+  }
+  $('profileChip').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const open = !$('profilePopover').classList.contains('open');
+    setProfilePopoverOpen(open);
+  });
+  $('profileSettingsEntry').addEventListener('click', (e) => {
+    e.stopPropagation();
+    setProfilePopoverOpen(false);
+    vscode.postMessage({ kind: 'openSettings' });
+  });
+
+  // ── messages ──
   function clearEmpty() {
     const e = $('empty');
     if (e) e.remove();
@@ -596,13 +1187,9 @@ ${getMarkdownStyleBlock()}
   function buildMsgNode(role, html) {
     const wrap = document.createElement('div');
     wrap.className = 'msg ' + role;
-    const roleEl = document.createElement('div');
-    roleEl.className = 'role';
-    roleEl.innerHTML = (role === 'user' ? ICON_USER : ICON_AI) + '<span>' + (role === 'user' ? 'You' : 'Assistant') + '</span>';
     const bubble = document.createElement('div');
     bubble.className = 'bubble markdown-body';
     bubble.innerHTML = html;
-    wrap.appendChild(roleEl);
     wrap.appendChild(bubble);
     return { wrap, bubble };
   }
@@ -654,7 +1241,7 @@ ${getMarkdownStyleBlock()}
   });
 
   function setStreaming(b) {
-    isStreaming = b;
+    state.streaming = b;
     const btn = $('sendBtn');
     if (b) {
       btn.classList.add('stop');
@@ -673,9 +1260,7 @@ ${getMarkdownStyleBlock()}
     $('error').textContent = msg;
     $('error').style.display = 'block';
   }
-  function clearError() {
-    $('error').style.display = 'none';
-  }
+  function clearError() { $('error').style.display = 'none'; }
 
   const input = $('input');
   function autoResize() {
@@ -684,7 +1269,7 @@ ${getMarkdownStyleBlock()}
   }
   input.addEventListener('input', () => {
     autoResize();
-    if (!isStreaming) $('sendBtn').disabled = !input.value.trim();
+    if (!state.streaming) $('sendBtn').disabled = !input.value.trim();
   });
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -694,7 +1279,7 @@ ${getMarkdownStyleBlock()}
   });
 
   function submit() {
-    if (isStreaming) {
+    if (state.streaming) {
       vscode.postMessage({ kind: 'stop' });
       return;
     }
@@ -710,6 +1295,7 @@ ${getMarkdownStyleBlock()}
   $('sendBtn').onclick = submit;
   $('clearBtn').onclick = () => vscode.postMessage({ kind: 'clear' });
   $('settingsBtn').onclick = () => vscode.postMessage({ kind: 'openSettings' });
+  $('newConvBtn').onclick = () => vscode.postMessage({ kind: 'newConversation' });
 
   function renderEmpty() {
     $('messages').innerHTML = '<div class="empty-state" id="empty">' +
@@ -719,40 +1305,56 @@ ${getMarkdownStyleBlock()}
       '</div>';
   }
 
-  function setProfile(label) {
-    const el = $('profileBadge');
-    el.textContent = label || '未配置';
-    el.classList.toggle('off', !label);
-  }
-
   window.addEventListener('message', (ev) => {
     const m = ev.data;
     if (m.kind === 'init') {
-      setProfile(m.profile);
-      $('title').textContent = m.topic ? m.topic : 'Chat';
+      state.currentId = m.currentId;
+      state.conversations = m.conversations || [];
+      state.profiles = m.profiles || [];
+      state.activeProfileId = m.activeProfileId || '';
+      state.redact = !!m.redact;
+      $('title').textContent = m.topic || m.title || 'AI 助手';
       $('messages').innerHTML = '';
+      currentAssistantBubble = null;
+      setStreaming(false);
+      clearError();
       if (!m.history || m.history.length === 0) {
         renderEmpty();
       } else {
         for (const h of m.history) appendMsgHtml(h.role, h.html);
       }
-    } else if (m.kind === 'state') {
-      setProfile(m.profile);
+      renderConvList();
+      renderProfileChip();
+    } else if (m.kind === 'conversationsUpdated') {
+      state.conversations = m.conversations || [];
+      state.currentId = m.currentId || state.currentId;
+      renderConvList();
+    } else if (m.kind === 'profilesUpdated') {
+      state.profiles = m.profiles || [];
+      state.activeProfileId = m.activeProfileId || '';
+      state.redact = !!m.redact;
+      renderProfileChip();
     } else if (m.kind === 'userMsg') {
+      if (m.conversationId !== state.currentId) return;
       appendMsgHtml('user', m.html);
     } else if (m.kind === 'assistantStart') {
+      if (m.conversationId !== state.currentId) return;
       startAssistantBubble();
       setStreaming(true);
     } else if (m.kind === 'assistantHtml') {
+      if (m.conversationId !== state.currentId) return;
       updateAssistantBubble(m.html);
     } else if (m.kind === 'assistantDone') {
+      if (m.conversationId !== state.currentId) return;
       finalizeAssistant(m.html);
       setStreaming(false);
     } else if (m.kind === 'cleared') {
+      if (m.conversationId !== state.currentId) return;
       renderEmpty();
       clearError();
       setStreaming(false);
     } else if (m.kind === 'error') {
+      if (m.conversationId !== state.currentId) return;
       finalizeAssistant('');
       setStreaming(false);
       let txt = m.message;

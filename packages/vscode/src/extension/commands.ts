@@ -195,6 +195,9 @@ export function registerCommands(
     vscode.commands.registerCommand('ojAgent.ai.openPanel', () => {
       AIPanel.open(ctx, services);
     }),
+    vscode.commands.registerCommand('ojAgent.ai.newConversation', () => {
+      AIPanel.openNew(ctx, services);
+    }),
     vscode.commands.registerCommand('ojAgent.ai.addProfile', () => {
       SettingsPanel.show(ctx, services, oj);
     }),
