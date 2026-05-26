@@ -20,6 +20,11 @@ import type {
   PlatformProblemDetail,
   ProblemLangInfo,
 } from '../platform/adapter.js';
+import type { HarnessSpec } from '../judge/harness/spec.js';
+import { generateCppHarness } from '../judge/harness/cpp.js';
+import { generatePythonHarness } from '../judge/harness/python.js';
+import { generateJsHarness } from '../judge/harness/javascript.js';
+import { generateJavaHarness } from '../judge/harness/java.js';
 import { NoopLogger, type LoggerBackend } from '../logger/logger.js';
 import { normalizeSlug } from './slug.js';
 
@@ -50,6 +55,13 @@ export interface WorkspaceMeta {
   statementHash: string;
   /** 本地新增的自定义用例编号（cases/in_<n>.txt 的 n），用于在 UI 上区分远端 sample 与用户用例。旧 meta 缺省视为空数组。 */
   customCaseIndices?: number[];
+  /**
+   * 函数题 harness 规范（leetcode 等）。
+   * - kind=function:judge runner 会编译 harness.<ext> 而非 solution.<ext>
+   * - kind=unsupported:本地判题会失败,UI 应提示"请走云端"
+   * - undefined:此题不是函数题模式
+   */
+  harnessSpec?: HarnessSpec;
 }
 
 export interface WriteProblemOptions {
@@ -131,6 +143,7 @@ export class WorkspaceManager {
       fetchedAt: now,
       updatedAt: options.remoteUpdatedAt ?? now,
       statementHash: sha256(detail.statement),
+      harnessSpec: detail.harnessSpec,
     };
     await writeAtomic(
       path.join(problemDir, 'meta.json'),
@@ -153,18 +166,19 @@ export class WorkspaceManager {
       );
     }
 
-    // solution.<ext>(已存在不覆盖)
+    // solution.<ext> + 可选 harness.<ext>。
+    // 已抽到 writeSolutionAndHarness,这里只是包一层,沿用之前 codeSnippet 优先级:
+    //   problemLangs[lang].codeSnippet -> detail.codeSnippets[lang] -> defaultTemplate
     const lang = options.defaultLang ?? 'cpp';
-    const ext = LANG_EXT[lang];
-    const filename = lang === 'java' ? 'Main.java' : `solution.${ext}`;
-    const solutionPath = path.join(problemDir, filename);
-    const existed = await exists(solutionPath);
-    if (!existed) {
-      const fromProblemLangs = options.problemLangs?.find((p) => p.lang === lang)?.codeSnippet;
-      const fromDetail = detail.codeSnippets?.[lang === 'javascript' ? 'javascript' : lang];
-      const content = fromProblemLangs ?? fromDetail ?? defaultTemplate(lang);
-      await writeAtomic(solutionPath, content, this.logger);
-    }
+    const snippet =
+      options.problemLangs?.find((p) => p.lang === lang)?.codeSnippet ??
+      detail.codeSnippets?.[lang === 'javascript' ? 'javascript' : lang];
+    const { solutionPath } = await this.writeSolutionAndHarness(problemDir, {
+      lang,
+      snippet,
+      harnessSpec: detail.harnessSpec,
+      overwriteSolution: false,
+    });
 
     this.logger.info('workspace', 'wrote problem', {
       problemDir,
@@ -174,6 +188,101 @@ export class WorkspaceManager {
     });
 
     return { problemDir, created, solutionPath };
+  }
+
+  /**
+   * 仅写 solution.<ext> + 可选 harness.<ext>,不动 problem.md / meta.json / cases。
+   *
+   * 用途:vscode "切换语言" 路径——题目已经拉过,用户改语言时只需补对应文件。
+   *
+   * 规则:
+   *   - 文件名:函数题 + Java -> Solution.java; 函数题 + 其他语言 -> solution.<ext>;
+   *            非函数题 + Java -> Main.java; 其他 -> solution.<ext>
+   *   - solution 默认不覆盖(尊重用户已写的代码),传 overwriteSolution=true 才覆盖
+   *   - snippet 缺省时用 defaultTemplate
+   *   - harness 总是覆盖(确定性生成,且依赖 snippet/spec)
+   */
+  async writeSolutionAndHarness(
+    problemDir: string,
+    opts: {
+      lang: DefaultLang;
+      snippet?: string;
+      harnessSpec?: HarnessSpec;
+      overwriteSolution?: boolean;
+    },
+  ): Promise<{ solutionPath: string; harnessPath?: string; solutionCreated: boolean }> {
+    const { lang, snippet, harnessSpec, overwriteSolution = false } = opts;
+    await fs.mkdir(problemDir, { recursive: true });
+
+    const isFunctionProblem = harnessSpec?.kind === 'function';
+    const ext = LANG_EXT[lang];
+    const solutionName =
+      lang === 'java'
+        ? (isFunctionProblem ? 'Solution.java' : 'Main.java')
+        : `solution.${ext}`;
+    const solutionPath = path.join(problemDir, solutionName);
+    const existed = await exists(solutionPath);
+    let solutionCreated = false;
+    if (!existed || overwriteSolution) {
+      const content = snippet ?? defaultTemplate(lang);
+      await writeAtomic(solutionPath, content, this.logger);
+      solutionCreated = !existed;
+    }
+
+    await this.writeHarnessIfApplicable(problemDir, harnessSpec, lang);
+
+    // 计算 harnessPath(若生成了)用于回传
+    const harnessFile =
+      isFunctionProblem
+        ? lang === 'java'
+          ? 'Harness.java'
+          : lang === 'cpp'
+          ? 'harness.cpp'
+          : lang === 'python3'
+          ? 'harness.py'
+          : lang === 'javascript'
+          ? 'harness.js'
+          : undefined
+        : undefined;
+    const harnessPath = harnessFile ? path.join(problemDir, harnessFile) : undefined;
+    return { solutionPath, harnessPath, solutionCreated };
+  }
+
+  /**
+   * 若 spec 是函数题且 lang 有对应 harness 生成器,则写 harness.<ext>。
+   * 不应用时静默跳过(adapter/Spec 不支持 / lang 暂未实现)。
+   */
+  private async writeHarnessIfApplicable(
+    problemDir: string,
+    spec: HarnessSpec | undefined,
+    lang: DefaultLang,
+  ): Promise<void> {
+    if (!spec || spec.kind !== 'function') return;
+    let src: string | undefined;
+    let filename: string | undefined;
+    switch (lang) {
+      case 'cpp':
+        src = generateCppHarness(spec);
+        filename = 'harness.cpp';
+        break;
+      case 'python3':
+        src = generatePythonHarness(spec);
+        filename = 'harness.py';
+        break;
+      case 'javascript':
+        src = generateJsHarness(spec);
+        filename = 'harness.js';
+        break;
+      case 'java':
+        src = generateJavaHarness(spec);
+        filename = 'Harness.java';
+        break;
+      // c 暂不支持(LeetCode C snippet 用 malloc 风格签名,与 C++ 差异大,后续 change)
+      default:
+        return;
+    }
+    if (!src || !filename) return;
+    await writeAtomic(path.join(problemDir, filename), src, this.logger);
   }
 
   async readMeta(problemDir: string): Promise<WorkspaceMeta | undefined> {
@@ -231,6 +340,7 @@ export class WorkspaceManager {
       updatedAt: now,
       statementHash: sha256(detail.statement),
       customCaseIndices: meta?.customCaseIndices,
+      harnessSpec: detail.harnessSpec,
     };
     await writeAtomic(
       path.join(problemDir, 'meta.json'),
@@ -254,6 +364,21 @@ export class WorkspaceManager {
       );
     }
     // 注意:编号 > N 的用户自定义 case 保留(不动 in_{N+1}.txt 等)
+
+    // 刷新 harness:已存在的 harness.<ext> 按新 spec 重生成。不存在则不创建,避免给从未启用过 harness 的目录强加文件。
+    if (detail.harnessSpec?.kind === 'function') {
+      const langExtPairs: Array<{ lang: DefaultLang; file: string }> = [
+        { lang: 'cpp', file: 'harness.cpp' },
+        { lang: 'python3', file: 'harness.py' },
+        { lang: 'javascript', file: 'harness.js' },
+        { lang: 'java', file: 'Harness.java' },
+      ];
+      for (const { lang, file } of langExtPairs) {
+        if (await exists(path.join(problemDir, file))) {
+          await this.writeHarnessIfApplicable(problemDir, detail.harnessSpec, lang);
+        }
+      }
+    }
 
     this.logger.info('workspace', 'refreshed problem', { problemDir });
     return { refreshed: true };
