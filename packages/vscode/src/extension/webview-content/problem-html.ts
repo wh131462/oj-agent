@@ -247,6 +247,48 @@ ${getMarkdownStyleBlock()}
   }
   .menu .panel button:disabled { opacity: 0.4; cursor: not-allowed; }
   .menu .panel button.selected { background: var(--oj-hover); }
+
+  /* ── antd-style tooltip ── */
+  .oj-tooltip {
+    position: fixed;
+    z-index: 1000;
+    padding: 6px 8px;
+    background: rgba(0, 0, 0, 0.85);
+    color: #fff;
+    font-size: 12px;
+    line-height: 1.4;
+    border-radius: 6px;
+    box-shadow:
+      0 6px 16px 0 rgba(0, 0, 0, 0.08),
+      0 3px 6px -4px rgba(0, 0, 0, 0.12),
+      0 9px 28px 8px rgba(0, 0, 0, 0.05);
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(2px);
+    transition: opacity 0.1s ease-out, transform 0.1s ease-out;
+    white-space: nowrap;
+    max-width: 250px;
+  }
+  .oj-tooltip.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  .oj-tooltip::before {
+    content: '';
+    position: absolute;
+    bottom: -4px;
+    left: 50%;
+    transform: translateX(-50%) rotate(45deg);
+    width: 8px;
+    height: 8px;
+    background: rgba(0, 0, 0, 0.85);
+    border-radius: 1px;
+  }
+  .oj-tooltip.bottom::before {
+    bottom: auto;
+    top: -4px;
+  }
+
   .menu .panel .lang-hint {
     padding: 6px 12px;
     font-size: 11px;
@@ -278,11 +320,11 @@ ${getMarkdownStyleBlock()}
   </header>
 
   <div class="toolbar">
-    <button class="btn primary" data-cmd="judge.runAll" title="运行测试用例">
+    <button class="btn primary" data-cmd="judge.runAll">
       <svg class="icon" viewBox="0 0 16 16" fill="currentColor"><path d="M4 3l9 5-9 5V3z"/></svg>
       运行
     </button>
-    <button class="btn" data-cmd="submission.submit" title="提交">
+    <button class="btn" data-cmd="submission.submit">
       <svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3M3 8l5-5 5 5"/></svg>
       提交
     </button>
@@ -301,7 +343,7 @@ ${getMarkdownStyleBlock()}
     </button>
     <span class="spacer"></span>
     <div class="menu" id="langMenu">
-      <button class="btn" id="langToggle" title="切换源代码语言">
+      <button class="btn" id="langToggle">
         <span id="langLabel">${escapeHtml(LANG_LABELS[currentLang])}</span>
         <svg class="chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"/></svg>
       </button>
@@ -311,7 +353,7 @@ ${getMarkdownStyleBlock()}
       </div>
     </div>
     <div class="menu" id="aiMenu">
-      <button class="btn" id="aiToggle" ${aiDisabled} title="AI 助手">
+      <button class="btn" id="aiToggle" ${aiDisabled}>
         AI
         <svg class="chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"/></svg>
       </button>
@@ -396,6 +438,74 @@ ${getMarkdownStyleBlock()}
     const m = ev.data;
     if (m && m.type === 'aiAvailableChanged') setAiEnabled(m.enabled);
   });
+
+  // ── antd-style tooltip：接管 .toolbar 内带 title 的按钮 ──
+  (() => {
+    const tip = document.createElement('div');
+    tip.className = 'oj-tooltip';
+    tip.setAttribute('role', 'tooltip');
+    document.body.appendChild(tip);
+
+    let showTimer = 0;
+    let currentTarget = null;
+
+    const hide = () => {
+      if (showTimer) { clearTimeout(showTimer); showTimer = 0; }
+      tip.classList.remove('visible');
+      currentTarget = null;
+    };
+
+    const place = (target) => {
+      const rect = target.getBoundingClientRect();
+      // 先显示以测量尺寸
+      tip.style.left = '0px';
+      tip.style.top = '0px';
+      tip.classList.add('visible');
+      const tipRect = tip.getBoundingClientRect();
+      const gap = 6;
+      let left = rect.left + rect.width / 2 - tipRect.width / 2;
+      let top = rect.top - tipRect.height - gap;
+      // 视口边界保护
+      const margin = 4;
+      if (left < margin) left = margin;
+      if (left + tipRect.width > window.innerWidth - margin) {
+        left = window.innerWidth - margin - tipRect.width;
+      }
+      if (top < margin) {
+        // 上方放不下则放到下方，箭头反转
+        top = rect.bottom + gap;
+        tip.classList.add('bottom');
+      } else {
+        tip.classList.remove('bottom');
+      }
+      tip.style.left = left + 'px';
+      tip.style.top = top + 'px';
+    };
+
+    const enhance = (btn) => {
+      const text = btn.getAttribute('title');
+      if (!text) return;
+      btn.dataset.tip = text;
+      btn.removeAttribute('title');
+      btn.addEventListener('mouseenter', () => {
+        if (btn.disabled) return;
+        currentTarget = btn;
+        if (showTimer) clearTimeout(showTimer);
+        showTimer = setTimeout(() => {
+          if (currentTarget !== btn) return;
+          tip.textContent = btn.dataset.tip || '';
+          place(btn);
+        }, 100);
+      });
+      btn.addEventListener('mouseleave', hide);
+      btn.addEventListener('click', hide);
+      btn.addEventListener('blur', hide);
+    };
+
+    document.querySelectorAll('.toolbar .btn.icon-only[title]').forEach(enhance);
+    window.addEventListener('scroll', hide, true);
+    window.addEventListener('resize', hide);
+  })();
 </script></body></html>`;
 }
 
