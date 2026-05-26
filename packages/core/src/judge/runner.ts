@@ -122,9 +122,20 @@ export class JudgeRunner {
   async runAll(options: JudgeRunOptions): Promise<JudgeRunResult> {
     const { problemDir, lang } = options;
     const defaults = LANG_DEFAULTS[lang];
+    // 函数题:同目录存在 harness.<ext> 时,改编 harness。solution.<ext> 仍为用户编辑文件,
+    // C++ 通过 #include "solution.cpp" 把它拉进翻译单元;
+    // Java 是双文件同时 javac;
+    // Python/JS 通过运行时 import / vm 加载。
+    const harnessName = lang === 'java' ? 'Harness.java' : `harness.${LANG_EXT[lang]}`;
+    const harnessPath = path.join(problemDir, harnessName);
+    const harnessExists = await fs.stat(harnessPath).then(() => true).catch(() => false);
     const sourcePath =
       options.sourcePath ??
-      (lang === 'java' ? path.join(problemDir, 'Main.java') : path.join(problemDir, `solution.${LANG_EXT[lang]}`));
+      (harnessExists
+        ? harnessPath
+        : lang === 'java'
+        ? path.join(problemDir, 'Main.java')
+        : path.join(problemDir, `solution.${LANG_EXT[lang]}`));
 
     // 工具链探测
     const snapshot = await this.toolchain.probe();
@@ -150,11 +161,22 @@ export class JudgeRunner {
       throw new AdapterError('PLATFORM_ERROR', `读取源文件失败: ${sourcePath}`, false, e);
     }
 
+    // 走 harness 模式时,solution.<ext> 通过 #include 注入,缓存命中必须把它也算进去。
+    let hashSrc = srcContent;
+    if (harnessExists) {
+      const solName = lang === 'java' ? 'Main.java' : `solution.${LANG_EXT[lang]}`;
+      const solPath = path.join(problemDir, solName);
+      const solContent = await fs.readFile(solPath, 'utf-8').catch(() => '');
+      hashSrc = srcContent + '\n///__OJA_SOLUTION__///\n' + solContent;
+    }
+
     const compileCmdTpl = options.compileCmdTemplate ?? defaults.compileCmd;
     let buildDir = '';
     let runArtifact = sourcePath; // python/js 默认直接跑 src
+    // Java 主类名:harness 模式跑 Harness,否则跑 Main
+    const javaMainClass = lang === 'java' ? (harnessExists ? 'Harness' : 'Main') : 'Main';
     if (compileCmdTpl) {
-      const hash = computeBuildHash(srcContent, compileCmdTpl);
+      const hash = computeBuildHash(hashSrc, compileCmdTpl);
       buildDir = getBuildDir(problemDir, hash);
       const cached = await buildDirExists(buildDir);
       if (!cached) {
@@ -164,7 +186,7 @@ export class JudgeRunner {
           src: sourcePath,
           out,
           dir: buildDir,
-          main: 'Main',
+          main: javaMainClass,
         });
         const compileRes = await runShell(cmd, { stdin: '', timeoutMs: 30_000, cwd: problemDir });
         if (compileRes.exitCode !== 0) {
@@ -186,7 +208,7 @@ export class JudgeRunner {
       src: sourcePath,
       out: runArtifact,
       dir: buildDir || problemDir,
-      main: 'Main',
+      main: javaMainClass,
     });
 
     // 逐 case 执行
