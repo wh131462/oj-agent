@@ -38,8 +38,14 @@ export class ProblemContextProvider {
     const lang = await inferLangFromDir(dir, this.getDefaultLang());
     let code: string | undefined;
     try {
-      const filename = lang === 'java' ? 'Main.java' : `solution.${langExt(lang)}`;
-      code = await fs.readFile(path.join(dir, filename), 'utf-8');
+      if (lang === 'java') {
+        // 函数题用 Solution.java,ACM 题用 Main.java,谁存在读谁
+        code =
+          (await fs.readFile(path.join(dir, 'Solution.java'), 'utf-8').catch(() => undefined)) ??
+          (await fs.readFile(path.join(dir, 'Main.java'), 'utf-8').catch(() => undefined));
+      } else {
+        code = await fs.readFile(path.join(dir, `solution.${langExt(lang)}`), 'utf-8');
+      }
     } catch {
       /* ignore */
     }

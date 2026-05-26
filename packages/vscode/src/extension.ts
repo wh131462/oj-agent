@@ -122,10 +122,8 @@ export function activate(ctx: vscode.ExtensionContext): void {
         void vscode.window.showWarningMessage('题目目录未找到，请先拉取题目');
         return;
       }
-      await ensureSolutionFile(dir, lang);
-      const target = solutionFilenameForLang(lang);
-      const filePath = (await import('node:path')).join(dir, target);
-      const doc = await vscode.workspace.openTextDocument(filePath);
+      const { solutionPath } = await ensureSolutionFile(oj, dir, lang);
+      const doc = await vscode.workspace.openTextDocument(solutionPath);
       await vscode.window.showTextDocument(doc, pickOpenColumn());
       problemTree.refreshLocalFiles();
     },
@@ -189,8 +187,8 @@ export function activate(ctx: vscode.ExtensionContext): void {
     const root = resolveWorkspaceRoot(oj.configBackend);
     if (!root) return;
     const rootUri = vscode.Uri.file(expandHomeDir(root));
-    // 监听 <root>/<platform>/<problemDir>/{solution.*,Main.java,meta.json} 与 cases/*.txt
-    const pattern = new vscode.RelativePattern(rootUri, '*/*/{solution.*,Main.java,meta.json,cases/*.txt}');
+    // 监听 <root>/<platform>/<problemDir>/{solution.*,Main.java,Solution.java,meta.json} 与 cases/*.txt
+    const pattern = new vscode.RelativePattern(rootUri, '*/*/{solution.*,Main.java,Solution.java,meta.json,cases/*.txt}');
     const w = vscode.workspace.createFileSystemWatcher(pattern);
     const trigger = debounce(() => problemTree.refreshLocalFiles(), 200);
     workspaceWatcher = vscode.Disposable.from(
@@ -260,56 +258,61 @@ async function openSolutionFile(
   // 优先：调用方明确指定了 lang（如 webview 顶部菜单当前选中），按其打开对应文件
   let target: string | undefined;
   if (preferLang) {
-    const want = solutionFilenameForLang(preferLang);
-    if (files.includes(want)) target = want;
+    const wants = solutionFilenamesForLang(preferLang);
+    target = wants.find((w) => files.includes(w));
   }
-  // 兜底：扫到任何 solution.* / Main.java，避免目录里只剩一个语言文件时无法打开
+  // 兜底：扫到任何 solution.* / Solution.java / Main.java
   if (!target) {
-    target = files.find((f) => /^solution\.[a-z]+$/i.test(f) || f === 'Main.java');
+    target = files.find(
+      (f) => /^solution\.[a-z]+$/i.test(f) || f === 'Main.java' || f === 'Solution.java',
+    );
   }
   if (!target) {
-    void vscode.window.showWarningMessage('未找到 solution.* 或 Main.java');
+    void vscode.window.showWarningMessage('未找到 solution.* / Solution.java / Main.java');
     return;
   }
   const doc = await vscode.workspace.openTextDocument(path.join(dir, target));
   await vscode.window.showTextDocument(doc, pickOpenColumn());
 }
 
-function solutionFilenameForLang(lang: JudgeLang): string {
+/**
+ * 给定 lang,返回 solution 可能的文件名(按优先级)。Java 函数题用 Solution.java,
+ * 非函数题用 Main.java,我们两个都尝试,谁先存在用谁。
+ */
+function solutionFilenamesForLang(lang: JudgeLang): string[] {
   switch (lang) {
-    case 'cpp': return 'solution.cpp';
-    case 'c': return 'solution.c';
-    case 'python3': return 'solution.py';
-    case 'java': return 'Main.java';
-    case 'javascript': return 'solution.js';
+    case 'cpp': return ['solution.cpp'];
+    case 'c': return ['solution.c'];
+    case 'python3': return ['solution.py'];
+    case 'java': return ['Solution.java', 'Main.java'];
+    case 'javascript': return ['solution.js'];
   }
 }
 
-function solutionTemplateForLang(lang: JudgeLang): string {
-  switch (lang) {
-    case 'cpp':
-      return '#include <bits/stdc++.h>\nusing namespace std;\n\nint main() {\n    \n    return 0;\n}\n';
-    case 'c':
-      return '#include <stdio.h>\n\nint main(void) {\n    \n    return 0;\n}\n';
-    case 'python3':
-      return 'def main() -> None:\n    pass\n\n\nif __name__ == "__main__":\n    main()\n';
-    case 'java':
-      return 'import java.util.*;\nimport java.io.*;\n\npublic class Main {\n    public static void main(String[] args) throws IOException {\n        \n    }\n}\n';
-    case 'javascript':
-      return '"use strict";\n\nfunction main() {\n    \n}\n\nmain();\n';
-  }
-}
-
-async function ensureSolutionFile(dir: string, lang: JudgeLang): Promise<void> {
-  const { promises: fs } = await import('node:fs');
-  const path = await import('node:path');
-  const target = solutionFilenameForLang(lang);
-  const filePath = path.join(dir, target);
-  try {
-    await fs.access(filePath);
-  } catch {
-    await fs.writeFile(filePath, solutionTemplateForLang(lang), 'utf-8');
-  }
+/**
+ * 切语言时确保对应 solution 文件存在,并按需生成 harness。
+ *
+ * 与之前裸写本地模板不同:这里走 core 的 writeSolutionAndHarness,
+ *   - 读 meta.json 拿 codeSnippets[lang] 与 harnessSpec
+ *   - 函数题(leetcode 等) Java -> Solution.java + Harness.java; 其他语言同时生成 harness.<ext>
+ *   - 非函数题保持原行为(Main.java / solution.<ext>),不生成 harness
+ * 返回真实落地的 solutionPath,调用方据此打开。
+ */
+async function ensureSolutionFile(
+  oj: ReturnType<typeof buildOJServices>,
+  dir: string,
+  lang: JudgeLang,
+): Promise<{ solutionPath: string }> {
+  // C 暂不支持 harness 生成,workspace-manager 会跳过 harness,solution 仍按常规落地
+  const meta = await oj.workspaceManager.readMeta(dir);
+  const snippet = meta?.codeSnippets?.[lang === 'javascript' ? 'javascript' : lang];
+  const { solutionPath } = await oj.workspaceManager.writeSolutionAndHarness(dir, {
+    lang,
+    snippet,
+    harnessSpec: meta?.harnessSpec,
+    overwriteSolution: false,
+  });
+  return { solutionPath };
 }
 
 function expandHomeDir(p: string): string {

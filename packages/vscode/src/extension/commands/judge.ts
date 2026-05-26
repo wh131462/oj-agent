@@ -39,15 +39,19 @@ export async function inferLangFromDir(
 
   // 步骤 1：调用方明确指定的 lang 优先（文件存在才采纳）
   if (preferLang) {
-    const want = preferLang === 'java' ? 'Main.java' : `solution.${LANG_TO_EXT[preferLang]}`;
-    if (files.includes(want)) return preferLang;
+    if (preferLang === 'java') {
+      if (files.includes('Solution.java') || files.includes('Main.java')) return 'java';
+    } else {
+      const want = `solution.${LANG_TO_EXT[preferLang]}`;
+      if (files.includes(want)) return preferLang;
+    }
   }
 
-  // 步骤 2：按 mtime 倒序找最近编辑过的 solution.* / Main.java
+  // 步骤 2：按 mtime 倒序找最近编辑过的 solution.* / Solution.java / Main.java
   const candidates: Array<{ file: string; lang: JudgeLang; mtimeMs: number }> = [];
   for (const f of files) {
     let lang: JudgeLang | undefined;
-    if (f === 'Main.java') lang = 'java';
+    if (f === 'Main.java' || f === 'Solution.java') lang = 'java';
     else {
       const m = f.match(/^solution\.([a-z]+)$/i);
       if (m) lang = EXT_TO_LANG[m[1]!.toLowerCase()];
