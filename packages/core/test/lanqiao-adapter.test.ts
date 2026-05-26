@@ -68,7 +68,7 @@ test('蓝桥: login() 直接��� AUTH_REQUIRED', async () => {
 test('蓝桥: 匿名 listProblems 走公开 API', async () => {
   const body = JSON.stringify({
     count: 2,
-    results: [
+    data: [
       { id: 100, name: '单词分析', tags: ['math'], difficulty: 30, difficulty_level: 2 },
       { id: 101, name: '小明的烦恼', tags: ['dp'], difficulty: 80, difficulty_level: 3 },
     ],

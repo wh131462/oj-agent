@@ -7,7 +7,7 @@ import { ansiEnabled } from '../utils/globals.js';
 import { colorize } from '../render/ansi.js';
 import type { PlatformId } from '@oj-agent/core';
 
-const VERSION = '0.1.0';
+const VERSION = '0.0.1';
 const PLATFORMS: PlatformId[] = ['leetcode-cn', 'hdoj', 'codeforces', 'luogu', 'poj', 'lanqiao'];
 
 export const statusCommand: CommandModule = {

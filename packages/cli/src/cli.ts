@@ -19,7 +19,7 @@ import { configCommand } from './commands/config.js';
 import { platformsCommand } from './commands/platforms.js';
 import { toolchainCommand } from './commands/toolchain.js';
 
-const VERSION = '0.1.0';
+const VERSION = '0.0.1';
 
 const COMMANDS: CommandModule[] = [
   loginCommand,

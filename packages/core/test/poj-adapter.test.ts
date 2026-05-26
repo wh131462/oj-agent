@@ -71,13 +71,11 @@ test('POJ: listProblems 解析题目表', async () => {
 <table>
   <tr><th>Title</th></tr>
   <tr>
-    <td>&nbsp;</td>
     <td>1000</td>
     <td><a href="problem?id=1000">A + B Problem</a></td>
     <td>50.00%</td>
   </tr>
   <tr>
-    <td>&nbsp;</td>
     <td>1001</td>
     <td><a href="problem?id=1001">Exponentiation</a></td>
     <td>30.00%</td>
@@ -140,7 +138,7 @@ test('POJ: HttpClient GET 在首次 5xx 时按平台 profile 重试一次', asyn
   const okHtml = gbk(`<html><body>
 <table>
 <tr><th>x</th></tr>
-<tr><td>x</td><td>1000</td><td><a>A + B</a></td><td>1.00%</td></tr>
+<tr><td>1000</td><td><a>A + B</a></td><td>1.00%</td><td>May 1, 2026</td></tr>
 </table></body></html>`);
   const { adapter, calls } = makeAdapter(({ method }) => {
     if (method === 'GET') {

@@ -35,7 +35,7 @@ const run = (cmd, opts = {}) => {
 const pkgs = [
   { name: '@oj-agent/core', path: 'packages/core' },
   { name: '@oj-agent/cli', path: 'packages/cli' },
-  { name: 'oj-agent (vscode)', path: 'packages/vscode' },
+  { name: 'oj-agent', path: 'packages/vscode' },
 ];
 
 function readVersion(p) {

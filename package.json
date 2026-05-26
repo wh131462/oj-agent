@@ -1,6 +1,6 @@
 {
   "name": "oj-agent-monorepo",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "private": true,
   "description": "OJ-Agent monorepo root. See packages/* for individual packages.",
   "scripts": {

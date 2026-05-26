@@ -2,7 +2,7 @@
   "name": "oj-agent",
   "displayName": "OJ-Agent",
   "description": "面向多 OJ 平台的 VSCode 插件：在编辑器内统一完成题目拉取 → 本地测试 → 在线提交，并内置 AI 解题助手。",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "publisher": "wh131462",
   "private": true,
   "type": "module",
