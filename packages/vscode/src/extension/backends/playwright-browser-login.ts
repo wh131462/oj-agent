@@ -37,7 +37,6 @@ export interface PlaywrightOptions {
 export class PlaywrightBrowserLogin implements BrowserLoginCapture {
   private context?: BrowserContext;
   private cancelled = false;
-  private userDataDir?: string;
 
   constructor(private opts: PlaywrightOptions = {}) {}
 
@@ -49,7 +48,7 @@ export class PlaywrightBrowserLogin implements BrowserLoginCapture {
     if (!playwright) throw new BrowserNotFoundError('playwright-core 不可用,请安装 playwright-core');
 
     const candidates = orderCandidates(this.opts.preferredBrowser);
-    const launchResult = await this.tryLaunch(playwright, candidates);
+    const launchResult = await this.tryLaunch(playwright, candidates, config.platform);
     if (!launchResult) throw new BrowserNotFoundError();
     const { context, info } = launchResult;
     this.context = context;
@@ -125,15 +124,7 @@ export class PlaywrightBrowserLogin implements BrowserLoginCapture {
       }
       this.context = undefined;
     }
-    if (this.userDataDir) {
-      const dir = this.userDataDir;
-      this.userDataDir = undefined;
-      try {
-        await fs.rm(dir, { recursive: true, force: true });
-      } catch {
-        // ignore
-      }
-    }
+    // 持久化 profile：不再删除 userDataDir，保留登录态供下次复用
   }
 
   private validateReady(config: LoginConfig): void {
@@ -146,34 +137,40 @@ export class PlaywrightBrowserLogin implements BrowserLoginCapture {
   private async tryLaunch(
     playwright: PlaywrightModule,
     candidates: BrowserCandidate[],
+    platform: string,
   ): Promise<{ context: BrowserContext; info: { name: string; path: string } } | undefined> {
     for (const c of candidates) {
       if (c.executablePath && !existsSync(c.executablePath)) continue;
+      const userDataDir = path.join(os.homedir(), '.oja', 'browser-profile', platform);
+      await fs.mkdir(userDataDir, { recursive: true });
+      const launchOptions: Parameters<typeof playwright.chromium.launchPersistentContext>[1] = {
+        headless: false,
+        args: ['--no-first-run', '--no-default-browser-check'],
+        viewport: { width: 1024, height: 768 },
+      };
+      if (c.channel) launchOptions.channel = c.channel;
+      if (c.executablePath) launchOptions.executablePath = c.executablePath;
       try {
-        const userDataDir = path.join(
-          os.tmpdir(),
-          `oja-login-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        );
-        await fs.mkdir(userDataDir, { recursive: true });
-        const launchOptions: Parameters<typeof playwright.chromium.launchPersistentContext>[1] = {
-          headless: false,
-          args: ['--no-first-run', '--no-default-browser-check'],
-          viewport: { width: 1024, height: 768 },
-        };
-        if (c.channel) launchOptions.channel = c.channel;
-        if (c.executablePath) launchOptions.executablePath = c.executablePath;
         const context = await playwright.chromium.launchPersistentContext(userDataDir, launchOptions);
-        this.userDataDir = userDataDir;
         return {
           context,
           info: { name: c.name, path: c.executablePath ?? c.channel ?? 'unknown' },
         };
       } catch {
-        if (this.userDataDir) {
-          await fs.rm(this.userDataDir, { recursive: true, force: true }).catch(() => {});
-          this.userDataDir = undefined;
+        // 首次失败：可能是 profile 损坏（异常退出残留 lock 文件、版本不兼容等），
+        // 清空该 platform profile 后重试一次。
+        try {
+          await fs.rm(userDataDir, { recursive: true, force: true });
+          await fs.mkdir(userDataDir, { recursive: true });
+          const context = await playwright.chromium.launchPersistentContext(userDataDir, launchOptions);
+          return {
+            context,
+            info: { name: c.name, path: c.executablePath ?? c.channel ?? 'unknown' },
+          };
+        } catch {
+          // 仍失败,尝试下一候选浏览器
+          continue;
         }
-        continue;
       }
     }
     return undefined;
