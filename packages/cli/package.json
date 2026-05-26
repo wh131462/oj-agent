@@ -29,7 +29,7 @@
   "scripts": {
     "build": "tsc -p .",
     "watch": "tsc -p . -w",
-    "test": "node --test --import tsx \"test/**/*.test.ts\""
+    "test": "node --test --import tsx $(find test -name '*.test.ts' | sort)"
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",

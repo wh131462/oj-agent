@@ -630,7 +630,7 @@
   "scripts": {
     "build": "tsc -p .",
     "watch": "tsc -p . -w",
-    "test": "node --test --import tsx \"test/**/*.test.ts\"",
+    "test": "node --test --import tsx $(find test -name '*.test.ts' | sort)",
     "package": "node ../../scripts/vsce-package.mjs",
     "vsce:publish": "node ../../scripts/vsce-package.mjs --publish"
   },
