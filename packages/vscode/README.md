@@ -1,102 +1,153 @@
-# OJ-Agent VSCode 扩展
+# OJ-Agent
 
-面向多 OJ 平台的 VSCode 插件：在编辑器内统一完成 **拉取题目 → 本地测试 → 在线提交**，并内置 AI 解题助手。
+> 在 VSCode 里刷题，从此告别"浏览器 / IDE / 终端"之间来回切窗口。
 
-> **状态：** M1（LeetCode CN + HDOJ 双平台闭环）
+**OJ-Agent** 是一个面向多个 OJ 平台的 VSCode 扩展。它把 **浏览题库 → 一键拉题 → 本地评测 → 在线提交 → AI 解题答疑** 整合到编辑器内，让你专注于"思考与写代码"本身。
 
-## 功能概览（M1）
+---
 
-### 题库 TreeView (`OJ-Agent: 题库`)
-- 活动栏 → OJ-Agent → "题库" 视图
-- 两层结构：平台 → 题目；登录后展开可见列表
-- 工具栏：搜索 / 难度筛选 / 标签筛选 / 上一页 / 下一页 / 刷新
-- 右键题目：拉取到本地、浏览器中打开、复制题目 ID
+## 为什么选择 OJ-Agent
 
-### 题面 Webview (`ojAgent.problemView`)
-- markdown-it + KaTeX，离线公式渲染
-- 工具栏：运行 / 提交 / 刷新 / 打开代码 / 浏览器中打开
-- AI 入口：解释错因 / 思路 / 题解 / 解释代码（未配置 AI Profile 时按钮 disable）
+- 🌐 **6 大平台统一工作流** —— LeetCode 中国站、HDOJ、Codeforces、洛谷、POJ、蓝桥云课，一个插件全搞定
+- 🚀 **一键拉题，本地编码** —— 题面、示例用例、源码模板自动落地，离开浏览器也能刷
+- 🧪 **本地评测先行** —— 提交前先在本地把所有用例跑一遍，看清楚哪个 case 错在哪里
+- 🤖 **AI 解题助手** —— 卡题时让 AI 解释错因、给思路、给题解；不靠它写答案，靠它讲清思路
+- 🔐 **凭证与隐私安全** —— Cookie 与 API Key 仅存系统钥匙串，AI 上下文默认脱敏
+- 🌍 **多语言支持** —— C / C++ / Python3 / Java / JavaScript
 
-### 本地测试结果面板 (`ojAgent.judgeResult`)
-- 顶部 summary：`X / Y AC, total Zms`，可一键重跑
-- 每个用例显示 verdict / 耗时 / 期望 / 实际 / unified diff
-- 失败用例右上角"AI · 解释错因"按钮，自动注入 `caseIndex`
+---
 
-### 状态栏
-- `$(rocket) OJ-Agent` 常驻；提交时切到 `$(sync~spin) 提交中... → Judging... → AC 120ms`
-- 点击弹 QuickPick（登录 / 登出 / 重新登录 / 设置工作区根目录 / 打开 OutputChannel / 工具链状态）
+## 核心功能
 
-### 登录
-- **默认浏览器自动登录**:命令 `OJ-Agent: 登录 OJ 平台(浏览器自动)` 拉起系统 Chrome / Edge / Brave 任一,用户在浏览器内人工完成登录,扩展自动抓 cookie + 用户名
-- **手动粘贴**:命令 `OJ-Agent: 登录 OJ 平台(手动粘贴 Cookie)` 走 QuickInput / Webview 流程(M1 行为)
-- 浏览器找不到 / `playwright-core` 未装 → 自动降级到手动粘贴
-- macOS 首次会弹"扩展想控制 Chrome"对话框,需要点同意(只一次)
-- 凭证仅保存在 VSCode SecretStorage,与 AI Key 命名空间隔离
+### 📚 题库浏览
 
-## 配置项
+打开活动栏的 **OJ-Agent** 图标，左侧出现题库视图：
 
-```jsonc
-{
-  // OJ
-  "ojAgent.workspace.root": "",                       // 工作区根；空 = ~/oj-agent-workspace
-  "ojAgent.platforms.enabled": ["leetcode-cn", "hdoj"],
-  "ojAgent.http.proxy": "",
-  "ojAgent.http.rateLimit.leetcode-cn": 30,
-  "ojAgent.http.rateLimit.hdoj": 60,
-  "ojAgent.judge.timeoutMs": 3000,
-  "ojAgent.submission.minIntervalMs": 5000,
-  "ojAgent.submission.pollTimeoutMs": 60000,
-  "ojAgent.submission.confirmBeforeSubmit": true,
-  "ojAgent.ui.defaultLang": "cpp",                    // cpp | python3 | java | javascript
+- 平台 → 题目两层结构，登录后按平台展开
+- 顶部工具栏：**搜索关键词 / 按难度筛选 / 按标签筛选 / 上下翻页 / 跳页**
+- 右键题目可拉取到本地、在浏览器中打开、复制题目 ID、在资源管理器中显示
+- 每道题展开后挂载本地源码与所有测试用例，自定义用例随手增删
 
-  // AI（沿用既有）
-  "ojAgent.ai.activeProfileId": "",
-  "ojAgent.ai.privacy.redact": true
-}
+### 📖 题面 Webview
+
+拉题后自动打开题面面板，内嵌 markdown-it + KaTeX 渲染：
+
+- 完整题目描述、公式、示例用例离线渲染
+- 顶部按钮：**运行 / 提交 / 刷新 / 打开代码 / 浏览器中打开**
+- 支持**单题语言切换**——同一道题可以用 C++ 试一版，再用 Python 试一版
+- 一键唤起 AI：**解释错因 / 解题思路 / 完整题解 / 解释代码**
+
+### 🧪 本地评测
+
+写完代码点 **运行**，所有官方示例 + 自定义用例自动跑：
+
+- 顶部 summary：`3 / 5 AC, total 240ms`，一键重跑
+- 每个用例分别展示：判定结果、耗时、期望输出、实际输出、unified diff
+- 失败用例一键点击 **AI · 解释错因**，自动把题面、你的代码、错误信息打包给 AI
+
+### ☁️ 在线提交
+
+本地通过后点 **提交**，状态栏实时显示进度：
+
+```
+🚀 OJ-Agent  →  ⟳ 提交中...  →  Judging...  →  ✅ AC 120ms
 ```
 
-## 首次使用指引
+提交记录会保留，可随时通过 `打开最近一次提交结果` 重新查看。
 
-1. `Cmd+Shift+P` → `OJ-Agent: 设置工作区根目录`，选一个本地目录
-2. `OJ-Agent: 登录 OJ 平台` 登录 LeetCode CN 或 HDOJ
-3. 活动栏点击 OJ-Agent → 展开题库 → 找一道题 → 右键 → 拉取到本地
-4. 题面 Webview 打开后，编辑器侧打开 `solution.cpp` 编写代码
-5. 在题面工具栏点击 **运行** → 本地测试面板显示用例结果
-6. 通过后点 **提交**，状态栏会显示提交进度直至最终 verdict
-7. 若 WA，点失败用例右侧 **AI · 解释错因**（需先在 AI Profiles 中配置一个 Profile）
+### 🤖 AI 解题助手
 
-## 命令清单（M1 新增）
+不止是"对话框"，而是**贴合刷题场景**的四种能力：
 
-| 命令 | 说明 |
+| 能力 | 用法 |
 | --- | --- |
-| `ojAgent.platform.pullByUrl` | 粘贴 URL 拉题 |
-| `ojAgent.platform.pullProblem` | 从 TreeView 右键拉题 |
-| `ojAgent.platform.openInBrowser` | 浏览器中打开 |
-| `ojAgent.platform.refreshProblem` | 刷新本地题面 |
-| `ojAgent.platform.addCustomCase` | 添加自定义用例 |
-| `ojAgent.platform.copyProblemId` | 复制题目 ID |
-| `ojAgent.judge.runAll` | 本地测试·全部用例 |
-| `ojAgent.judge.runCase` | 本地测试·单用例 |
-| `ojAgent.judge.openToolchain` | 查看工具链状态 |
-| `ojAgent.submission.submit` | 提交当前题解 |
-| `ojAgent.submission.openLatest` | 打开最近一次提交结果 |
-| `ojAgent.auth.login / logout / relogin` | 登录管理 |
-| `ojAgent.workspace.setRoot` | 设置工作区根目录 |
-| `ojAgent.statusBar.openQuickPick` | 状态栏快捷面板 |
-| `ojAgent.openOutputChannel` | 打开 OJ-Agent OutputChannel |
+| **解释错因** | WA 时点失败用例旁的按钮，AI 看完题面、代码、错误用例后给出诊断 |
+| **生成思路** | 卡题时拿到分析方向，而不是直接给代码 |
+| **生成题解** | 想对照标准做法时，要一份完整题解 |
+| **解释代码** | 阅读他人或老代码时，让 AI 逐行讲清 |
 
-## 构建与开发
+**自由接入任何模型**：
+- 同时支持 **OpenAI Chat Completions** 与 **Anthropic Messages** 协议
+- 兼容 Azure OpenAI、DeepSeek、OpenRouter、Ollama 等任意兼容端点
+- 多 Profile 切换：日常题用便宜模型，难题切大模型，一条命令搞定
+- 独立 **AI 助手面板**，支持多会话、对话历史持久化
 
-```sh
-pnpm install
-pnpm --filter oj-agent build
-pnpm --filter oj-agent test     # 纯 mock 单测
-# 在 VSCode 内 F5 启动 Extension Host 调试
-```
+### 🔐 登录与凭证
 
-## 已知限制
+支持两种登录方式：
 
-- LeetCode CN Cookie 必须手动粘贴（HttpOnly 限制）
-- HDOJ Webview 登录受 VSCode 跨域 iframe 限制，60s 后自动降级到账号密码
-- 不支持 watch 模式（保存即测试），需手动触发运行
-- `vsce package` 与 monorepo `workspace:*` 依赖打包冲突待 M3 解决
+- **浏览器自动登录**（推荐）：扩展拉起系统 Chrome / Edge / Brave，你在浏览器内手动登录，Cookie 自动回传
+- **手动粘贴 Cookie**：附带详细的 Cookie 获取指引
+
+所有凭证仅存 **VSCode SecretStorage**，绝不写入设置文件。OJ Cookie 与 AI Key 命名空间隔离。
+
+---
+
+## 快速开始
+
+**第 1 步**：打开命令面板（`Cmd+Shift+P` / `Ctrl+Shift+P`），运行 **OJ-Agent: 设置工作区根目录**，选一个本地文件夹
+
+**第 2 步**：运行 **OJ-Agent: 登录 OJ 平台(浏览器自动)**，选你想登录的平台，在弹出的浏览器中完成登录
+
+**第 3 步**：点击活动栏的 OJ-Agent 图标 → 展开题库 → 找一道题 → 右键 **拉取到本地**
+
+**第 4 步**：题面打开后，编辑器侧自动出现 `solution.cpp`（或你选的语言），开始写代码
+
+**第 5 步**：题面工具栏点 **运行**，看本地评测结果
+
+**第 6 步**：通过后点 **提交**，等待最终判定
+
+**（可选）配置 AI**：命令面板 → **OJ-Agent: 打开 AI 模型设置** → 选预设或填自定义端点 → 填 API Key → 测试连接
+
+---
+
+## 支持的平台
+
+| 平台 | 登录方式 |
+| --- | --- |
+| LeetCode 中国站 | 浏览器自动 / Cookie 粘贴 |
+| HDOJ（杭电 OJ） | 账号密码 / 浏览器自动 |
+| Codeforces | 浏览器自动 / Cookie 粘贴 |
+| 洛谷 Luogu | 浏览器自动 / Cookie 粘贴 |
+| POJ（北大 OJ） | 账号密码 |
+| 蓝桥云课 | JWT |
+
+各平台能力略有差异——例如 LeetCode 中国站因 HttpOnly Cookie 限制无法在 Webview 内直接登录，扩展会自动选择最合适的登录方式。
+
+---
+
+## 隐私与安全
+
+- 所有 OJ 平台 Cookie / 账号密码、AI API Key 均仅存于 **VSCode SecretStorage**，从不落到 `settings.json` 或仓库
+- OJ 凭证与 AI 凭证使用独立命名空间，互不可读
+- 发送给 AI 的上下文默认脱敏（剥离 `username` / `submissionId` / `Cookie` / `Authorization`），可在设置中关闭
+- 浏览器自动登录使用临时配置目录，结束后自动清理，**不会污染你日常用的浏览器配置**
+- Cookie 值不写入任何日志
+
+---
+
+## 常用配置
+
+在 VSCode 设置中搜索 `ojAgent.`，可调整：
+
+- **工作区**：题库根目录、启用的平台、默认语言
+- **网络**：HTTP 代理、请求超时、各平台限速
+- **评测**：单 case 超时、自定义编译 / 运行模板
+- **提交**：提交间隔、轮询超时、提交前是否二次确认
+- **AI**：当前 Profile、限速、是否脱敏
+
+---
+
+## 反馈与贡献
+
+欢迎到 [GitHub 仓库](https://github.com/wh131462/oj-agent) 提 Issue 或 PR：
+
+- 想接入新的 OJ 平台？参考仓库内的平台适配器接入文档
+- 遇到 bug 或想提建议？直接开 Issue
+- 喜欢这个项目？欢迎给个 Star ⭐
+
+---
+
+## 许可
+
+MIT
