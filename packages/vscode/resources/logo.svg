@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#8b5cf6"/>
+    </linearGradient>
+  </defs>
+  <!-- 圆角方形背景 -->
+  <rect x="4" y="4" width="120" height="120" rx="24" ry="24" fill="url(#bg)"/>
+  <!-- O: 圆环 -->
+  <circle cx="44" cy="68" r="20" stroke="#ffffff" stroke-width="7" fill="none"/>
+  <!-- J: 竖钩 -->
+  <path d="M78 42 L78 72 Q78 90 62 90" stroke="#ffffff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <!-- Agent 状态指示点 -->
+  <circle cx="78" cy="32" r="6" fill="#34d399"/>
+  <!-- 底部代码装饰线 -->
+  <path d="M20 108 L36 108" stroke="rgba(255,255,255,0.4)" stroke-width="3" stroke-linecap="round"/>
+  <path d="M42 108 L68 108" stroke="rgba(255,255,255,0.4)" stroke-width="3" stroke-linecap="round"/>
+  <path d="M74 108 L84 108" stroke="rgba(255,255,255,0.4)" stroke-width="3" stroke-linecap="round"/>
+</svg>
