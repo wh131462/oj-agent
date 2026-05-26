@@ -42,7 +42,7 @@ if (MODE === 'deploy') {
   run(`pnpm deploy --filter oj-agent --prod --legacy ${deployDir}`);
   // 3a. 在 deploy 目录里跑 vsce package
   const cmd = PUBLISH
-    ? `npx --yes @vscode/vsce publish ${DRY_RUN ? '--no-update-package-json' : ''}`
+    ? `npx --yes @vscode/vsce publish --no-dependencies ${DRY_RUN ? '--no-update-package-json' : ''}`
     : `npx --yes @vscode/vsce package --no-dependencies --out ${VSCODE_PKG_DIR}`;
   run(cmd, { cwd: deployDir });
 } else {

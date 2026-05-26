@@ -68,8 +68,8 @@ try {
 // --- step 3: dry-run npm publish for core/cli ---
 log('step 3: npm publish --dry-run');
 try {
-  run('pnpm --filter @oj-agent/core publish --dry-run --no-git-checks');
-  run('pnpm --filter @oj-agent/cli publish --dry-run --no-git-checks');
+  run('pnpm --filter @oj-agent/core publish --dry-run --no-git-checks --registry https://registry.npmjs.com');
+  run('pnpm --filter @oj-agent/cli publish --dry-run --no-git-checks --registry https://registry.npmjs.com');
 } catch (e) {
   err('npm dry-run 失败，发布中止（包名冲突 / 元数据缺失？）');
   process.exit(1);
@@ -91,14 +91,40 @@ if (DRY_RUN) {
 
 // --- step 5: 真发布 ---
 log('step 5: 真发布开始');
-log('  5a. pnpm -r publish (npm)');
-try {
-  run('pnpm --filter @oj-agent/core --filter @oj-agent/cli publish --no-git-checks --access public');
-} catch (e) {
-  err('npm 发布失败');
-  err('回滚指引：已发布的版本无法删除，仅能 npm deprecate <pkg>@<ver> 后发修复版');
-  process.exit(1);
+
+function isNpmPublished(pkgName, version) {
+  try {
+    const result = execSync(
+      `npm view ${pkgName}@${version} version --registry https://registry.npmjs.com 2>/dev/null`,
+      { encoding: 'utf8', cwd: REPO_ROOT, stdio: ['pipe', 'pipe', 'pipe'] }
+    ).trim();
+    return result === version;
+  } catch {
+    return false;
+  }
 }
+
+log('  5a. pnpm publish (npm)');
+const npmPkgs = [
+  { filter: '@oj-agent/core', name: '@oj-agent/core' },
+  { filter: '@oj-agent/cli', name: '@oj-agent/cli' },
+];
+let npmAllSkipped = true;
+for (const pkg of npmPkgs) {
+  if (isNpmPublished(pkg.name, VERSION)) {
+    log(`  跳过 ${pkg.name}@${VERSION}（已发布）`);
+    continue;
+  }
+  npmAllSkipped = false;
+  try {
+    run(`pnpm --filter ${pkg.filter} publish --no-git-checks --access public --registry https://registry.npmjs.com`);
+  } catch (e) {
+    err(`npm 发布失败: ${pkg.name}`);
+    err('回滚指引：已发布的版本无法删除，仅能 npm deprecate <pkg>@<ver> 后发修复版');
+    process.exit(1);
+  }
+}
+if (npmAllSkipped) log('  所有 npm 包均已发布，跳过');
 
 log('  5b. vsce publish (Marketplace)');
 try {
