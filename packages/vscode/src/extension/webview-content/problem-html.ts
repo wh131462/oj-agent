@@ -6,6 +6,7 @@ import {
   getMarkdownAssetUris,
   buildMarkdownAssetLinks,
   getMarkdownStyleBlock,
+  getMarkdownInteractionScript,
 } from './markdown.js';
 
 export interface RenderProblemHtmlInput {
@@ -55,7 +56,9 @@ export function renderProblemHtml(input: RenderProblemHtmlInput): string {
     `default-src 'none'`,
     `img-src ${cspSource} https: data:`,
     `font-src ${cspSource}`,
-    `style-src ${cspSource} 'nonce-${nonce}' 'unsafe-inline'`,
+    // 注意:不能同时带 nonce 和 unsafe-inline —— CSP Level 2 规定二者并存时 unsafe-inline 被忽略。
+    // KaTeX 渲染输出大量带 inline style 的 span(top/height/margin),必须允许 unsafe-inline。
+    `style-src ${cspSource} 'unsafe-inline'`,
     `script-src 'nonce-${nonce}'`,
   ].join('; ');
 
@@ -325,6 +328,7 @@ ${getMarkdownStyleBlock()}
 
 </div>
 <script nonce="${nonce}">
+  ${getMarkdownInteractionScript()}
   const vscode = acquireVsCodeApi();
   const ref = ${JSON.stringify({ platform: problemRef.platform, id: problemRef.id, slug: problemRef.slug ?? '' })};
   let aiEnabled = ${aiEnabled ? 'true' : 'false'};

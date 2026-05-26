@@ -7,6 +7,7 @@ import {
   getMarkdownAssetUris,
   buildMarkdownAssetLinks,
   getMarkdownStyleBlock,
+  getMarkdownInteractionScript,
 } from './webview-content/markdown.js';
 
 type WebviewMsgIn =
@@ -498,7 +499,9 @@ export class AIPanel {
       `default-src 'none'`,
       `img-src ${cspSource} https: data:`,
       `font-src ${cspSource}`,
-      `style-src ${cspSource} 'nonce-${nonce}' 'unsafe-inline'`,
+      // CSP Level 2: 同时有 nonce 和 unsafe-inline 时,unsafe-inline 被忽略。
+      // KaTeX 输出大量内联 style 的 span,需要 unsafe-inline 才能正确渲染。
+      `style-src ${cspSource} 'unsafe-inline'`,
       `script-src 'nonce-${nonce}'`,
     ].join('; ');
 
@@ -957,6 +960,7 @@ ${getMarkdownStyleBlock()}
 </div>
 
 <script nonce="${nonce}">
+  ${getMarkdownInteractionScript()}
   const vscode = acquireVsCodeApi();
   const $ = (id) => document.getElementById(id);
 
