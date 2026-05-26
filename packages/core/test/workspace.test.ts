@@ -44,8 +44,8 @@ test('normalizeSlug: 中文回退', () => {
 
 test('WorkspaceManager: resolveProblemDir 命名', () => {
   const ws = new WorkspaceManager();
-  const dir = ws.resolveProblemDir('leetcode-cn', '1', 'two-sum', '/root', new Date('2026-05-22T00:00:00Z'));
-  assert.equal(dir, '/root/leetcode-cn/1-two-sum-2026-05-22');
+  const dir = ws.resolveProblemDir('leetcode-cn', '1', 'two-sum', '/root');
+  assert.equal(dir, '/root/leetcode-cn/1-two-sum');
 });
 
 test('WorkspaceManager: writeProblem 写盘所有字段', async () => {

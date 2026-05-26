@@ -2,7 +2,7 @@
  * 工作区管理器。
  *
  * 落盘约定:
- *   <rootDir>/<platform>/<id>-<slug>-<YYYY-MM-DD>/
+ *   <rootDir>/<platform>/<id>-<slug>/
  *     problem.md
  *     meta.json
  *     cases/in_<n>.txt
@@ -84,11 +84,10 @@ export class WorkspaceManager {
     id: string,
     rawSlug: string,
     rootDir: string,
-    date: Date = new Date(),
   ): string {
     const slug = normalizeSlug(rawSlug, id);
-    const ymd = date.toISOString().slice(0, 10);
-    return path.join(expandHome(rootDir), platform, `${id}-${slug}-${ymd}`);
+    const name = slug ? `${id}-${slug}` : id;
+    return path.join(expandHome(rootDir), platform, name);
   }
 
   async writeProblem(
@@ -102,7 +101,7 @@ export class WorkspaceManager {
       rawSlug,
       options.rootDir,
     );
-    const slug = path.basename(problemDir).replace(/-\d{4}-\d{2}-\d{2}$/, '').replace(`${detail.id}-`, '');
+    const slug = normalizeSlug(rawSlug, detail.id);
 
     let created = false;
     try {
