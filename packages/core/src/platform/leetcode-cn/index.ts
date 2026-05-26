@@ -3,6 +3,7 @@
  */
 
 import { AdapterError } from '../errors.js';
+import { parseLeetcodeMetaData } from '../../judge/harness/spec.js';
 import type {
   PlatformAdapter,
   PlatformCapabilities,
@@ -226,6 +227,7 @@ export class LeetCodeCnAdapter implements PlatformAdapter {
     for (const s of q.codeSnippets ?? []) {
       codeSnippets[s.langSlug] = s.code;
     }
+    const harnessSpec = parseLeetcodeMetaData(q.metaData ?? '');
 
     return {
       platform: this.id,
@@ -237,6 +239,7 @@ export class LeetCodeCnAdapter implements PlatformAdapter {
       statement,
       samples,
       codeSnippets,
+      harnessSpec,
     };
   }
 

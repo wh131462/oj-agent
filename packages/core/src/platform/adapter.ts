@@ -40,6 +40,13 @@ export interface PlatformProblemDetail extends PlatformProblemSummary {
   readonly codeSnippets?: Record<string, string>;
   readonly timeLimitMs?: number;
   readonly memoryLimitKb?: number;
+  /**
+   * 函数题 harness 规范（如 LeetCode）。已归一化的结构，与原始 metaData 解耦。
+   * - kind=function:可生成 harness 文件,本地能跑出 verdict
+   * - kind=unsupported:平台不支持本地判题(systemdesign / 未知类型等),不生成 harness
+   * - undefined:此平台无函数题概念(ACM 全程序模式),按 stdin/stdout 跑即可
+   */
+  readonly harnessSpec?: import('../judge/harness/spec.js').HarnessSpec;
 }
 
 /**
